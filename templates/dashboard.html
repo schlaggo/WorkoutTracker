@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}Dashboard{% endblock %}
+{% block content %}
+
+<h1>Hallo, {{ email }}</h1>
+
+<div class="card">
+  <h2>Aktive Ziele</h2>
+  {% if goals %}
+    {% for g in goals %}
+      <div class="workout-row">
+        <strong>
+          {% if g.exercises %}{{ g.exercises.name }} —{% endif %}
+          {{ g.metric_definitions.label }}
+        </strong>
+        <div>Ziel: {{ g.target_value }} {{ g.metric_definitions.unit or '' }}
+          {% if g.target_date %} bis {{ g.target_date }}{% endif %}
+        </div>
+      </div>
+    {% endfor %}
+  {% else %}
+    <p>Noch keine Ziele gesetzt.</p>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h2>Letzte Workouts</h2>
+  {% if workouts %}
+    {% for w in workouts %}
+      <div class="workout-row">
+        <span class="tag">{{ w.workout_types.label }}</span>
+        <strong>{{ w.date }}</strong>
+        {% if w.notes %}<div>{{ w.notes }}</div>{% endif %}
+      </div>
+    {% endfor %}
+  {% else %}
+    <p>Noch keine Workouts erfasst.</p>
+  {% endif %}
+</div>
+
+<a class="btn" href="{{ url_for('new_workout') }}">+ Neues Workout erfassen</a>
+
+{% endblock %}

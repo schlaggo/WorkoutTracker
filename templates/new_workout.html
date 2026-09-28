@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% block title %}Neues Workout{% endblock %}
+{% block content %}
+
+<div class="card">
+  <h1>Neues Workout erfassen</h1>
+  <form method="post" id="workout-form">
+
+    <label>Trainingstyp</label>
+    <div class="toggle-group">
+      <label><input type="radio" name="workout_type" value="1" checked onchange="toggleType()"> Krafttraining</label>
+      <label><input type="radio" name="workout_type" value="2" onchange="toggleType()"> Ausdauer</label>
+    </div>
+
+    <label for="date">Datum</label>
+    <input type="date" name="date" id="date">
+
+    <label for="exercise_id">Übung (aus Katalog)</label>
+    <select name="exercise_id" id="exercise_id">
+      <option value="">-- neue Übung unten eintragen --</option>
+      {% for ex in exercises %}
+        <option value="{{ ex.id }}">{{ ex.name }}</option>
+      {% endfor %}
+    </select>
+
+    <label for="new_exercise_name">... oder neue Übung anlegen</label>
+    <input type="text" name="new_exercise_name" id="new_exercise_name" placeholder="z.B. Kreuzheben">
+
+    <div id="strength-fields">
+      <h2 style="margin-top:24px;">Sätze</h2>
+      {% for i in range(1, 6) %}
+        <div class="set-row">
+          <div>
+            <label>Satz {{ i }} — Gewicht (kg)</label>
+            <input type="number" step="0.5" name="set_{{ i }}_weight">
+          </div>
+          <div>
+            <label>Satz {{ i }} — Wiederholungen</label>
+            <input type="number" name="set_{{ i }}_reps">
+          </div>
+        </div>
+      {% endfor %}
+    </div>
+
+    <div id="endurance-fields" style="display:none;">
+      <h2 style="margin-top:24px;">Ausdauerdaten</h2>
+      <label>Distanz (km)</label>
+      <input type="number" step="0.01" name="distance_km">
+      <label>Dauer (Sekunden)</label>
+      <input type="number" name="duration_s">
+      <label>Höhenmeter (m)</label>
+      <input type="number" name="elevation_m">
+      <label>Ø Herzfrequenz (bpm)</label>
+      <input type="number" name="heart_rate_avg">
+    </div>
+
+    <label for="notes">Notiz (optional)</label>
+    <textarea name="notes" id="notes" rows="2"></textarea>
+
+    <button type="submit">Workout speichern</button>
+  </form>
+</div>
+
+<script>
+function toggleType() {
+  const type = document.querySelector('input[name="workout_type"]:checked').value;
+  document.getElementById('strength-fields').style.display = (type === '1') ? 'block' : 'none';
+  document.getElementById('endurance-fields').style.display = (type === '2') ? 'block' : 'none';
+}
+</script>
+
+{% endblock %}
