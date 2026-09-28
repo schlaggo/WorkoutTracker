@@ -1,18 +1,26 @@
 import os
+import secrets
 from datetime import date
+from pathlib import Path
 
 from flask import Flask, render_template, request, redirect, session, url_for, flash
-from flask_session import Session
-from dotenv import load_dotenv
+from dotenv import load_dotenv, set_key
 
 from lib.supabase_client import get_client, get_authenticated_client
 
-load_dotenv()
+ENV_PATH = Path(__file__).resolve().parent / ".env"
+load_dotenv(ENV_PATH)
+
+if not os.environ.get("FLASK_SECRET_KEY"):
+    generated_key = secrets.token_hex(32)
+    set_key(str(ENV_PATH), "FLASK_SECRET_KEY", generated_key)
+    os.environ["FLASK_SECRET_KEY"] = generated_key
 
 app = Flask(__name__)
-app.secret_key = os.environ.get("FLASK_SECRET_KEY", "dev-only-unsicher")
-app.config["SESSION_TYPE"] = "filesystem"
-Session(app)
+app.secret_key = os.environ["FLASK_SECRET_KEY"]
+app.config["SESSION_COOKIE_HTTPONLY"] = True
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+app.config["SESSION_COOKIE_SECURE"] = bool(os.environ.get("RENDER"))
 
 
 def current_client():
