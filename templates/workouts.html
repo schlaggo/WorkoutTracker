@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}Workouts{% endblock %}
+{% block content %}
+
+<div class="page-head">
+  <h1>Workouts</h1>
+  <a class="btn" href="{{ url_for('new_workout') }}">+ Neues Workout</a>
+</div>
+
+{% if not months %}
+  <div class="card">
+    <p>Noch keine Workouts erfasst.</p>
+  </div>
+{% endif %}
+
+{% for month in months %}
+  <h2 class="month-title">{{ month.label }}</h2>
+
+  {% for w in month.workouts %}
+    <a class="card workout-card" href="{{ url_for('workout_detail', workout_id=w.id) }}">
+      <div class="workout-card-top">
+        <strong>{{ w.date|weekday_date }}{% if w.start_time %} · {{ w.start_time }}{% endif %}</strong>
+        <span class="tag {{ w.type_key }}">{{ w.type_label }}</span>
+      </div>
+
+      <div class="muted">
+        {{ w.entries|map(attribute='name')|join(' · ') or 'Keine Übungen' }}
+      </div>
+
+      <div class="workout-card-stats">
+        {% if w.summary.sets %}<span><b>{{ w.summary.sets }}</b> Sätze</span>{% endif %}
+        {% if w.summary.volume %}<span><b>{{ w.summary.volume|num(0) }}</b> kg Volumen</span>{% endif %}
+        {% if w.summary.distance_km %}<span><b>{{ w.summary.distance_km|num(2) }}</b> km</span>{% endif %}
+        {% if w.summary.duration_s %}<span><b>{{ w.summary.duration_s|duration }}</b> Dauer</span>{% endif %}
+      </div>
+    </a>
+  {% endfor %}
+{% endfor %}
+
+{% endblock %}

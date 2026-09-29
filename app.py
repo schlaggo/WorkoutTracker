@@ -85,6 +85,116 @@ def collect_exercise_blocks(form):
         })
     return blocks
 
+# ------------------------------------------------------------
+# Workouts laden: DB-Zeilen (EAV) -> handliche Struktur für die Templates
+# ------------------------------------------------------------
+# Supabase kann verknüpfte Tabellen direkt mitladen ("embedding"):
+# workouts -> workout_entries -> exercises + entry_metrics -> metric_definitions
+WORKOUT_SELECT = (
+    "id, date, start_time, notes, created_at, workout_types(key, label), "
+    "workout_entries(id, order_index, exercises(name), "
+    "entry_metrics(set_number, value, metric_definitions(key)))"
+)
+
+
+def clean_number(v):
+    """62.0 -> 62, 62.5 -> 62.5 (für schöne Anzeige)"""
+    f = float(v)
+    return int(f) if f.is_integer() else f
+
+
+def build_workout(raw):
+    """Baut aus einer DB-Zeile ein Workout-Dict:
+    {id, date, start_time, notes, type_key, type_label,
+     entries: [{name, sets: [{weight_kg, reps}], endurance: {distance_km, ...}}],
+     summary: {sets, volume, distance_km, duration_s}}
+    """
+    entries = []
+    for e in sorted(raw.get("workout_entries") or [], key=lambda x: x["order_index"]):
+        sets, endurance = {}, {}
+        for m in e.get("entry_metrics") or []:
+            key = m["metric_definitions"]["key"]
+            value = clean_number(m["value"])
+            if m["set_number"] is None:
+                endurance[key] = value
+            else:
+                sets.setdefault(m["set_number"], {})[key] = value
+        entries.append({
+            "name": (e.get("exercises") or {}).get("name", "?"),
+            "sets": [sets[n] for n in sorted(sets)],
+            "endurance": endurance,
+        })
+
+    summary = {"sets": 0, "volume": 0, "distance_km": 0, "duration_s": 0}
+    for e in entries:
+        for st in e["sets"]:
+            summary["sets"] += 1
+            if "weight_kg" in st and "reps" in st:
+                summary["volume"] += st["weight_kg"] * st["reps"]
+        summary["distance_km"] += e["endurance"].get("distance_km", 0)
+        summary["duration_s"] += e["endurance"].get("duration_s", 0)
+
+    wtype = raw.get("workout_types") or {}
+    return {
+        "id": raw["id"],
+        "date": date.fromisoformat(raw["date"]),
+        "start_time": (raw.get("start_time") or "")[:5] or None,
+        "notes": raw.get("notes"),
+        "type_key": wtype.get("key"),
+        "type_label": wtype.get("label", ""),
+        "entries": entries,
+        "summary": summary,
+    }
+
+
+# ------------------------------------------------------------
+# Anzeige-Filter für Templates (deutsches Format)
+# ------------------------------------------------------------
+WEEKDAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"]
+MONTHS = ["Jänner", "Februar", "März", "April", "Mai", "Juni", "Juli",
+          "August", "September", "Oktober", "November", "Dezember"]
+
+
+@app.template_filter("num")
+def format_number(v, decimals=1):
+    """1234.5 -> '1.234,5'"""
+    if v is None or v == "":
+        return "–"
+    v = float(v)
+    text = f"{v:,.0f}" if v.is_integer() else f"{v:,.{decimals}f}"
+    return text.replace(",", "X").replace(".", ",").replace("X", ".")
+
+
+@app.template_filter("duration")
+def format_duration(seconds):
+    """3120 -> '52:00', 3725 -> '1:02:05'"""
+    if not seconds:
+        return "–"
+    h, rest = divmod(int(seconds), 3600)
+    m, s = divmod(rest, 60)
+    return f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}"
+
+
+@app.template_filter("pace")
+def format_pace(seconds_per_km):
+    """312.5 -> '5:12' (min/km)"""
+    m, s = divmod(int(round(seconds_per_km)), 60)
+    return f"{m}:{s:02d}"
+
+
+@app.template_filter("weekday_date")
+def format_weekday_date(d):
+    """date(2026, 9, 29) -> 'Di, 29.9.'"""
+    return f"{WEEKDAYS[d.weekday()]}, {d.day}.{d.month}."
+
+
+@app.template_filter("long_date")
+def format_long_date(d):
+    """date(2026, 9, 29) -> 'Di, 29. September 2026'"""
+    return f"{WEEKDAYS[d.weekday()]}, {d.day}. {MONTHS[d.month - 1]} {d.year}"
+
+
+
 
 # Legt die Profil Zeile an, falls sie noch fehlt
 def ensure_profile(client, user):
@@ -280,9 +390,60 @@ def new_workout():
                 client.table("entry_metrics").insert(rows).execute()
 
         flash("Workout gespeichert.", "success")
-        return redirect(url_for("dashboard"))
+        return redirect(url_for("workout_detail", workout_id=workout_id))
 
     return render_template("new_workout.html", exercises=exercises.data)
+
+
+# ------------------------------------------------------------
+# Workout-Bereich: Liste, Detailansicht, Löschen
+# ------------------------------------------------------------
+@app.route("/workouts")
+@login_required
+def workouts_list():
+    client = current_client()
+    rows = (
+        client.table("workouts")
+        .select(WORKOUT_SELECT)
+        .order("date", desc=True)
+        .order("start_time", desc=True)
+        .execute()
+    )
+    workouts = [build_workout(r) for r in rows.data]
+
+    # Nach Monaten gruppieren: [{"label": "September 2026", "workouts": [...]}, ...]
+    months = []
+    for w in workouts:
+        label = f"{MONTHS[w['date'].month - 1]} {w['date'].year}"
+        if not months or months[-1]["label"] != label:
+            months.append({"label": label, "workouts": []})
+        months[-1]["workouts"].append(w)
+
+    return render_template("workouts.html", months=months)
+
+
+@app.route("/workouts/<workout_id>")
+@login_required
+def workout_detail(workout_id):
+    client = current_client()
+    rows = client.table("workouts").select(WORKOUT_SELECT).eq("id", workout_id).execute()
+    if not rows.data:  # gibt es nicht oder gehört einem anderen User (RLS)
+        flash("Workout nicht gefunden.", "error")
+        return redirect(url_for("workouts_list"))
+    return render_template("workout_detail.html", w=build_workout(rows.data[0]))
+
+
+@app.route("/workouts/<workout_id>/delete", methods=["POST"])
+@login_required
+def delete_workout(workout_id):
+    client = current_client()
+    # Übungen und Werte werden per "on delete cascade" automatisch mitgelöscht
+    client.table("workouts").delete().eq("id", workout_id).execute()
+    flash("Workout gelöscht.", "success")
+    return redirect(url_for("workouts_list"))
+
+
+
 
 if __name__ == "__main__":
     app.run(debug=True)

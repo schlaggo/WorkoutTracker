@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}Workout {{ w.date|weekday_date }}{% endblock %}
+{% block content %}
+
+<a class="back-link" href="{{ url_for('workouts_list') }}">← Alle Workouts</a>
+
+<div class="card">
+  <div class="workout-card-top">
+    <h1 style="margin:0;font-size:24px;">{{ w.date|long_date }}</h1>
+    <span class="tag {{ w.type_key }}">{{ w.type_label }}</span>
+  </div>
+  {% if w.start_time %}<div class="muted">Uhrzeit: {{ w.start_time }}</div>{% endif %}
+  {% if w.notes %}<p class="notes">{{ w.notes }}</p>{% endif %}
+
+  <div class="workout-card-stats">
+    <span><b>{{ w.entries|length }}</b> Übungen</span>
+    {% if w.summary.sets %}<span><b>{{ w.summary.sets }}</b> Sätze</span>{% endif %}
+    {% if w.summary.volume %}<span><b>{{ w.summary.volume|num(0) }}</b> kg Volumen</span>{% endif %}
+    {% if w.summary.distance_km %}<span><b>{{ w.summary.distance_km|num(2) }}</b> km</span>{% endif %}
+    {% if w.summary.duration_s %}<span><b>{{ w.summary.duration_s|duration }}</b> Dauer</span>{% endif %}
+  </div>
+</div>
+
+{% for e in w.entries %}
+  <div class="card">
+    <h2>{{ e.name }}</h2>
+
+    {# Kraft: Tabelle mit allen Sätzen #}
+    {% if e.sets %}
+      <table class="sets-table">
+        <tr><th>Satz</th><th>Gewicht</th><th>Wdh.</th></tr>
+        {% for s in e.sets %}
+          <tr>
+            <td>{{ loop.index }}</td>
+            <td>{{ (s.weight_kg|num ~ ' kg') if s.weight_kg is defined else 'Körpergewicht' }}</td>
+            <td>{{ s.reps|num if s.reps is defined else '–' }}</td>
+          </tr>
+        {% endfor %}
+      </table>
+    {% endif %}
+
+    {# Ausdauer: Einzelwerte #}
+    {% if e.endurance %}
+      {% set end = e.endurance %}
+      <div class="value-grid">
+        {% if end.distance_km is defined %}<div><span class="muted">Distanz</span><b>{{ end.distance_km|num(2) }} km</b></div>{% endif %}
+        {% if end.duration_s is defined %}<div><span class="muted">Dauer</span><b>{{ end.duration_s|duration }}</b></div>{% endif %}
+        {% if end.distance_km and end.duration_s %}<div><span class="muted">Pace</span><b>{{ (end.duration_s / end.distance_km)|pace }} /km</b></div>{% endif %}
+        {% if end.elevation_m is defined %}<div><span class="muted">Höhenmeter</span><b>{{ end.elevation_m|num(0) }} m</b></div>{% endif %}
+        {% if end.heart_rate_avg is defined %}<div><span class="muted">Ø Herzfrequenz</span><b>{{ end.heart_rate_avg|num(0) }} bpm</b></div>{% endif %}
+      </div>
+    {% endif %}
+
+    {% if not e.sets and not e.endurance %}<p class="muted">Keine Werte erfasst.</p>{% endif %}
+  </div>
+{% endfor %}
+
+<form method="post" action="{{ url_for('delete_workout', workout_id=w.id) }}"
+      onsubmit="return confirm('Workout wirklich löschen? Das kann nicht rückgängig gemacht werden.');">
+  <button type="submit" class="danger">Workout löschen</button>
+</form>
+
+{% endblock %}
