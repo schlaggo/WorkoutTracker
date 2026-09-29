@@ -1,23 +1,21 @@
 import os
-import secrets
+import os
+import time
 from datetime import date
-from pathlib import Path
 
+import jwt
 from flask import Flask, render_template, request, redirect, session, url_for, flash
-from dotenv import load_dotenv, set_key
+from dotenv import load_dotenv
+from supabase import create_client
 
 from lib.supabase_client import get_client, get_authenticated_client
 
-ENV_PATH = Path(__file__).resolve().parent / ".env"
-load_dotenv(ENV_PATH)
-
-if not os.environ.get("FLASK_SECRET_KEY"):
-    generated_key = secrets.token_hex(32)
-    set_key(str(ENV_PATH), "FLASK_SECRET_KEY", generated_key)
-    os.environ["FLASK_SECRET_KEY"] = generated_key
+load_dotenv()
 
 app = Flask(__name__)
 app.secret_key = os.environ["FLASK_SECRET_KEY"]
+
+# Cookie-Sessions absichern (auf Render läuft alles über HTTPS)
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 app.config["SESSION_COOKIE_SECURE"] = bool(os.environ.get("RENDER"))
@@ -25,8 +23,26 @@ app.config["SESSION_COOKIE_SECURE"] = bool(os.environ.get("RENDER"))
 
 def current_client():
     token = session.get("access_token")
-    if not token:
+    refresh = session.get("refresh_token")
+    if not token or not refresh:
         return None
+
+    try:
+        exp = jwt.decode(token, options={"verify_signature": False})["exp"]
+    except Exception:
+        exp = 0
+
+    # Weniger als 60 Sekunden gültig -> erneuern
+    if exp - time.time() < 60:
+        try:
+            fresh = create_client(os.environ["SUPABASE_URL"], os.environ["SUPABASE_ANON_KEY"])
+            res = fresh.auth.refresh_session(refresh)
+        except Exception:
+            return None
+        session["access_token"] = res.session.access_token
+        session["refresh_token"] = res.session.refresh_token
+        token = res.session.access_token
+
     return get_authenticated_client(token)
 
 
@@ -35,13 +51,16 @@ def login_required(view):
 
     @wraps(view)
     def wrapped(*args, **kwargs):
-        if "user_id" not in session:
+        if "user_id" not in session or current_client() is None:
+            session.clear()
+            flash("Sitzung abgelaufen, bitte neu einloggen.", "error")
             return redirect(url_for("login"))
         return view(*args, **kwargs)
 
     return wrapped
 
 
+# Eingeloggt -> Dashboard, ansonsten login
 @app.route("/", methods=["GET"])
 def index():
     if "user_id" in session:
@@ -49,6 +68,7 @@ def index():
     return redirect(url_for("login"))
 
 
+# Registrierung
 @app.route("/signup", methods=["GET", "POST"])
 def signup():
     if request.method == "POST":
@@ -82,6 +102,7 @@ def signup():
     return render_template("signup.html")
 
 
+# Login
 @app.route("/login", methods=["GET", "POST"])
 def login():
     if request.method == "POST":
@@ -104,12 +125,13 @@ def login():
     return render_template("login.html")
 
 
+# Logout und wieder auf Login anzeigen
 @app.route("/logout")
 def logout():
     session.clear()
     return redirect(url_for("login"))
 
-
+# Dashboard anzeigen mit Workouts und Goals
 @app.route("/dashboard")
 @login_required
 def dashboard():
@@ -138,6 +160,7 @@ def dashboard():
     )
 
 
+# Neues Workout erstellen
 @app.route("/workouts/new", methods=["GET", "POST"])
 @login_required
 def new_workout():
