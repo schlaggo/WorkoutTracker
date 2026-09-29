@@ -63,11 +63,11 @@
       {% set x = loop.index0 * 40 + 8 %}
       {% set hs = h.strength / max_per_week * 90 %}
       {% set he = h.endurance / max_per_week * 90 %}
-      <rect x="{{ x }}" y="{{ 112 - hs }}" width="24" height="{{ hs }}" fill="#2f6fed" rx="3"/>
-      <rect x="{{ x }}" y="{{ 112 - hs - he }}" width="24" height="{{ he }}" fill="#3aa35b" rx="3"/>
-      <text x="{{ x + 12 }}" y="130" text-anchor="middle" font-size="10" fill="#777">{{ h.label[3:] }}</text>
+      <rect x="{{ x }}" y="{{ 112 - hs }}" width="24" height="{{ hs }}" class="bar-strength" rx="4"/>
+      <rect x="{{ x }}" y="{{ 112 - hs - he }}" width="24" height="{{ he }}" class="bar-endurance" rx="4"/>
+      <text x="{{ x + 12 }}" y="130" text-anchor="middle" font-size="10" class="label">{{ h.label[3:] }}</text>
       {% if h.strength + h.endurance %}
-        <text x="{{ x + 12 }}" y="{{ 107 - hs - he }}" text-anchor="middle" font-size="10" fill="#1a1a1a">{{ h.strength + h.endurance }}</text>
+        <text x="{{ x + 12 }}" y="{{ 107 - hs - he }}" text-anchor="middle" font-size="10" class="count">{{ h.strength + h.endurance }}</text>
       {% endif %}
     {% endfor %}
   </svg>

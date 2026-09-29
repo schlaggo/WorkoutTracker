@@ -2,26 +2,15 @@
 <html lang="de">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#0b0e11">
   <title>{% block title %}Workout Tracker{% endblock %}</title>
+  <link rel="preconnect" href="https://eur03.safelinks.protection.outlook.com/?url=https%3A%2F%2Ffonts.googleapis.com%2F&data=05%7C02%7Clukas.singer%40ceratizit.com%7C1718bb1fbac0466ea82e08df1e2286ff%7C6e754c036c26480fa166ff9598a067ed%7C0%7C0%7C639262805782676484%7CUnknown%7CTWFpbGZsb3d8eyJFbXB0eU1hcGkiOnRydWUsIlYiOiIwLjAuMDAwMCIsIlAiOiJXaW4zMiIsIkFOIjoiTWFpbCIsIldUIjoyfQ%3D%3D%7C0%7C%7C%7C&sdata=MKWDy3ch%2Bc6R4wdqIvemO09BIdzTZl6oM3S8AB%2Fpp%2Fg%3D&reserved=0">
+  <link rel="preconnect" href="https://eur03.safelinks.protection.outlook.com/?url=https%3A%2F%2Ffonts.gstatic.com%2F&data=05%7C02%7Clukas.singer%40ceratizit.com%7C1718bb1fbac0466ea82e08df1e2286ff%7C6e754c036c26480fa166ff9598a067ed%7C0%7C0%7C639262805782708346%7CUnknown%7CTWFpbGZsb3d8eyJFbXB0eU1hcGkiOnRydWUsIlYiOiIwLjAuMDAwMCIsIlAiOiJXaW4zMiIsIkFOIjoiTWFpbCIsIldUIjoyfQ%3D%3D%7C0%7C%7C%7C&sdata=GVPIUPRxZrIi74s4luy0R44jNa9iJ4pXfp3SHBByjhM%3D&reserved=0" crossorigin>
+  <link href="https://eur03.safelinks.protection.outlook.com/?url=https%3A%2F%2Ffonts.googleapis.com%2Fcss2%3Ffamily%3DInter%3Awght%40400%3B500%3B600%3B700%3B800%26display%3Dswap&data=05%7C02%7Clukas.singer%40ceratizit.com%7C1718bb1fbac0466ea82e08df1e2286ff%7C6e754c036c26480fa166ff9598a067ed%7C0%7C0%7C639262805782733643%7CUnknown%7CTWFpbGZsb3d8eyJFbXB0eU1hcGkiOnRydWUsIlYiOiIwLjAuMDAwMCIsIlAiOiJXaW4zMiIsIkFOIjoiTWFpbCIsIldUIjoyfQ%3D%3D%7C0%7C%7C%7C&sdata=X98mkcKTKz24BtJDspkHejmRFR5tO%2F0Jv3H%2FlGoI4n0%3D&reserved=0" rel="stylesheet">
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
-  <nav>
-    <span class="brand">Workout Tracker</span>
-    <div>
-      {% if session.get('user_id') %}
-        <a href="{{ url_for('dashboard') }}">Dashboard</a>
-        <a href="{{ url_for('workouts_list') }}">Workouts</a>
-        <a href="{{ url_for('goals_list') }}">Goals</a>
-        <a href="{{ url_for('logout') }}">Logout</a>
-      {% else %}
-        <a href="{{ url_for('login') }}">Login</a>
-        <a href="{{ url_for('signup') }}">Signup</a>
-      {% endif %}
-    </div>
-  </nav>
-
   <main>
     {% with messages = get_flashed_messages(with_categories=true) %}
       {% if messages %}
@@ -33,5 +22,33 @@
 
     {% block content %}{% endblock %}
   </main>
+
+  {# Navigation unten – nur wenn eingeloggt. request.endpoint = Name der aktuellen Route #}
+  {% if session.get('user_id') %}
+    {% set ep = request.endpoint or '' %}
+    <nav class="tabbar">
+      <div class="inner">
+        <a href="{{ url_for('dashboard') }}" class="{{ 'active' if ep == 'dashboard' }}">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>
+          Dashboard
+        </a>
+        <a href="{{ url_for('workouts_list') }}" class="{{ 'active' if 'workout' in ep and ep != 'new_workout' }}">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6.5 6.5v11M17.5 6.5v11M3 9.5v5M21 9.5v5M6.5 12h11"/></svg>
+          Workouts
+        </a>
+        <a href="{{ url_for('new_workout') }}" aria-label="Neues Workout">
+          <span class="plus"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></span>
+        </a>
+        <a href="{{ url_for('goals_list') }}" class="{{ 'active' if 'goal' in ep }}">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1"/></svg>
+          Ziele
+        </a>
+        <a href="{{ url_for('logout') }}">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></svg>
+          Logout
+        </a>
+      </div>
+    </nav>
+  {% endif %}
 </body>
 </html>
