@@ -1,9 +1,16 @@
+
 {% extends "base.html" %}
-{% block title %}Neues Workout{% endblock %}
+{% block title %}{{ 'Workout bearbeiten' if workout else 'Neues Workout' }}{% endblock %}
 {% block content %}
 
+{% if workout %}
+  <a class="back-link" href="{{ url_for('workout_detail', workout_id=workout.id) }}">← Zurück zum Workout</a>
+{% else %}
+  <a class="back-link" href="{{ url_for('workouts_list') }}">← Alle Workouts</a>
+{% endif %}
+
 <div class="card">
-  <h1>Neues Workout erfassen</h1>
+  <h1>{{ 'Workout bearbeiten' if workout else 'Neues Workout erfassen' }}</h1>
   <form method="post" id="workout-form">
 
     <label>Trainingstyp</label>
@@ -30,7 +37,9 @@
     <div id="exercises"></div>
 
     <button type="button" class="secondary" id="add-exercise">+ Übung hinzufügen</button>
-    <button type="submit" style="display:block;width:100%;">Workout speichern</button>
+    <button type="submit" style="display:block;width:100%;">
+      {{ 'Änderungen speichern' if workout else 'Workout speichern' }}
+    </button>
   </form>
 </div>
 
@@ -82,7 +91,11 @@
   </div>
 </template>
 
+<script type="application/json" id="initial-data">{{ initial|tojson }}</script>
 <script>
+// Beim Bearbeiten: gespeicherte Daten des Workouts, bei neuem Workout: null
+const INITIAL = JSON.parse(document.getElementById('initial-data').textContent)
+
 let exerciseCounter = 0;
 const exercisesEl = document.getElementById('exercises');
 
@@ -90,23 +103,37 @@ function currentType() {
   return document.querySelector('input[name="workout_type"]:checked').value;
 }
 
-// Einen Satz an eine Übung anhängen
-function addSet(block) {
+// Einen Satz an eine Übung anhängen (optional mit Werten vorbefüllt)
+function addSet(block, values = {}) {
   const setsEl = block.querySelector('.sets');
   const m = setsEl.children.length + 1;
   const html = document.getElementById('set-template').innerHTML
     .replaceAll('__N__', block.dataset.n)
     .replaceAll('__M__', m);
   setsEl.insertAdjacentHTML('beforeend', html);
+  const row = setsEl.lastElementChild;
+  row.querySelector('input[name$="_weight"]').value = values.weight_kg ?? '';
+  row.querySelector('input[name$="_reps"]').value = values.reps ?? '';
 }
 
-// Neue Übung (mit 3 leeren Sätzen) hinzufügen
-function addExercise() {
-  const html = document.getElementById('exercise-template').innerHTML
-    .replaceAll('__N__', exerciseCounter++);
+// Übung hinzufügen. data = gespeicherte Übung (beim Bearbeiten) oder null (neu, 3 leere Sätze)
+function addExercise(data = null) {
+  const n = exerciseCounter++;
+  const html = document.getElementById('exercise-template').innerHTML.replaceAll('__N__', n);
   exercisesEl.insertAdjacentHTML('beforeend', html);
   const block = exercisesEl.lastElementChild;
-  for (let i = 0; i < 3; i++) addSet(block);
+
+  if (data) {
+    block.querySelector('.exercise-select').value = data.exercise_id;
+    data.sets.forEach(s => addSet(block, s));
+    if (data.sets.length === 0) addSet(block);
+    for (const [key, value] of Object.entries(data.endurance)) {
+      const input = block.querySelector(`input[name="ex_${n}_${key}"]`);
+      if (input) input.value = value;
+    }
+  } else {
+    for (let i = 0; i < 3; i++) addSet(block);
+  }
   applyType();
 }
 
@@ -123,7 +150,7 @@ function applyType() {
   });
 }
 
-// Klicks auf "+ Satz" und "Entfernen" (Event-Delegation: ein Listener für alle Übungen)
+// Klicks auf "+ Satz" und "Entfernen" (ein Listener für alle Übungen)
 exercisesEl.addEventListener('click', (ev) => {
   const action = ev.target.dataset.action;
   const block = ev.target.closest('.exercise-block');
@@ -131,16 +158,25 @@ exercisesEl.addEventListener('click', (ev) => {
   if (action === 'remove-exercise') block.remove();
 });
 
-document.getElementById('add-exercise').addEventListener('click', addExercise);
+document.getElementById('add-exercise').addEventListener('click', () => addExercise());
 document.querySelectorAll('input[name="workout_type"]').forEach(r => r.addEventListener('change', applyType));
 
-// Datum und Uhrzeit mit "jetzt" vorausfüllen (lokale Zeit des Handys/PCs)
-const now = new Date();
-const pad = (n) => String(n).padStart(2, '0');
-document.getElementById('date').value = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
-document.getElementById('start_time').value = `${pad(now.getHours())}:${pad(now.getMinutes())}`;
-
-addExercise();  // mit einer Übung starten
+if (INITIAL) {
+  // Bearbeiten: Formular mit den gespeicherten Daten füllen
+  document.querySelector(`input[name="workout_type"][value="${INITIAL.type_id}"]`).checked = true;
+  document.getElementById('date').value = INITIAL.date;
+  document.getElementById('start_time').value = INITIAL.start_time;
+  document.getElementById('notes').value = INITIAL.notes;
+  INITIAL.entries.forEach(e => addExercise(e));
+  if (INITIAL.entries.length === 0) addExercise();
+} else {
+  // Neu: Datum und Uhrzeit mit "jetzt" vorausfüllen (lokale Zeit von Handy/PC)
+  const now = new Date();
+  const pad = (n) => String(n).padStart(2, '0');
+  document.getElementById('date').value = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+  document.getElementById('start_time').value = `${pad(now.getHours())}:${pad(now.getMinutes())}`;
+  addExercise();  // mit einer Übung starten
+}
 </script>
 
 {% endblock %}

@@ -91,8 +91,8 @@ def collect_exercise_blocks(form):
 # Supabase kann verknüpfte Tabellen direkt mitladen ("embedding"):
 # workouts -> workout_entries -> exercises + entry_metrics -> metric_definitions
 WORKOUT_SELECT = (
-    "id, date, start_time, notes, created_at, workout_types(key, label), "
-    "workout_entries(id, order_index, exercises(name), "
+    "id, date, start_time, notes, created_at, workout_type_id, workout_types(key, label), "
+    "workout_entries(id, order_index, exercise_id, exercises(name),"
     "entry_metrics(set_number, value, metric_definitions(key)))"
 )
 
@@ -120,6 +120,7 @@ def build_workout(raw):
             else:
                 sets.setdefault(m["set_number"], {})[key] = value
         entries.append({
+            "exercise_id":e["exercise_id"],
             "name": (e.get("exercises") or {}).get("name", "?"),
             "sets": [sets[n] for n in sorted(sets)],
             "endurance": endurance,
@@ -137,6 +138,7 @@ def build_workout(raw):
     wtype = raw.get("workout_types") or {}
     return {
         "id": raw["id"],
+        "type_id": raw["workout_type_id"],
         "date": date.fromisoformat(raw["date"]),
         "start_time": (raw.get("start_time") or "")[:5] or None,
         "notes": raw.get("notes"),
@@ -303,96 +305,134 @@ def dashboard():
         email=session.get("email"),
     )
 
+# ------------------------------------------------------------
+# Workout anlegen / bearbeiten (gemeinsame Logik, gleiches Formular)
+# ------------------------------------------------------------
+def load_exercises(client):
+    return client.table("exercises").select("id, name, workout_type_id").order("name").execute().data
 
-# Neues Workout erstellen (mehrere Übungen, beliebig viele Sätze)
+
+def parse_workout_form(form, is_strength):
+    """Prüft das Formular und rechnet alle Werte um – noch OHNE zu speichern.
+    Rückgabe: (entries, fehlermeldung). Bei Fehler ist entries None.
+    """
+    entries = []
+    try:
+        for b in collect_exercise_blocks(form):
+            if not b["exercise_id"] and not b["new_name"]:
+                continue  # leerer Übungsblock -> ignorieren
+            metrics = []  # Liste von (metrik_key, satz_nummer, wert)
+            if is_strength:
+                set_no = 0
+                for weight, reps in b["sets"]:
+                    weight, reps = to_float(weight), to_float(reps)
+                    if reps is None:
+                        continue  # Satz ohne Wiederholungen -> leere Zeile
+                    set_no += 1
+                    metrics.append(("reps", set_no, reps))
+                    if weight is not None:  # ohne Gewicht = Körpergewichtsübung
+                        metrics.append(("weight_kg", set_no, weight))
+            else:
+                for key in ENDURANCE_KEYS:
+                    val = to_float(b["endurance"].get(key))
+                    if val is not None:
+                        metrics.append((key, None, val))
+            entries.append({**b, "metrics": metrics})
+    except ValueError:
+        return None, "Bitte bei Gewicht, Wiederholungen und Ausdauerwerten nur Zahlen eingeben."
+
+    if not entries:
+        return None, "Bitte mindestens eine Übung auswählen oder neu anlegen."
+    return entries, None
+
+
+def save_workout_form(client, workout_id=None):
+    """Speichert das Formular. workout_id=None -> neues Workout, sonst bearbeiten.
+
+    Das eigentliche Speichern übernimmt die DB-Funktion save_workout():
+    Workout + alle Übungen + alle Werte in EINER Transaktion (alles oder nichts).
+    Rückgabe: ID des gespeicherten Workouts, oder None bei Fehler (Meldung per flash).
+    """
+    workout_type = int(request.form["workout_type"])
+    entries, error = parse_workout_form(request.form, is_strength=(workout_type == 1))
+    if error:
+        flash(error, "error")
+        return None
+
+    payload_entries = []
+    for e in entries:
+        exercise_id = e["exercise_id"]
+        if not exercise_id:  # neue Übung zuerst anlegen
+            created = client.table("exercises").insert({
+                "workout_type_id": workout_type,
+                "name": e["new_name"],
+                "is_custom": True,
+                "created_by": session["user_id"],
+            }).execute()
+            exercise_id = created.data[0]["id"]
+        payload_entries.append({
+            "exercise_id": exercise_id,
+            "metrics": [{"key": k, "set_number": n, "value": v} for k, n, v in e["metrics"]],
+        })
+
+    payload = {
+        "id": workout_id,
+        "workout_type_id": workout_type,
+        "date": request.form.get("date") or str(date.today()),
+        "start_time": request.form.get("start_time") or None,
+        "notes": request.form.get("notes", "").strip() or None,
+        "entries": payload_entries,
+    }
+    try:
+        result = client.rpc("save_workout", {"p": payload}).execute()
+    except Exception as ex:
+        flash(f"Speichern fehlgeschlagen: {ex}", "error")
+        return None
+    return result.data
+
+
+def form_state(w):
+    """Workout -> Daten zum Vorbefüllen des Formulars (wird als JSON ans JavaScript gegeben)."""
+    return {
+        "type_id": w["type_id"],
+        "date": w["date"].isoformat(),
+        "start_time": w["start_time"] or "",
+        "notes": w["notes"] or "",
+        "entries": [
+            {"exercise_id": e["exercise_id"], "sets": e["sets"], "endurance": e["endurance"]}
+            for e in w["entries"]
+        ],
+    }
+
+
 @app.route("/workouts/new", methods=["GET", "POST"])
 @login_required
 def new_workout():
     client = current_client()
-    exercises = client.table("exercises").select("id, name, workout_type_id").order("name").execute()
+    if request.method == "POST":
+        workout_id = save_workout_form(client)
+        if workout_id:
+            flash("Workout gespeichert.", "success")
+            return redirect(url_for("workout_detail", workout_id=workout_id))
+    return render_template("workout_form.html", exercises=load_exercises(client), workout=None, initial=None)
+
+
+@app.route("/workouts/<workout_id>/edit", methods=["GET", "POST"])
+@login_required
+def edit_workout(workout_id):
+    client = current_client()
+    rows = client.table("workouts").select(WORKOUT_SELECT).eq("id", workout_id).execute()
+    if not rows.data:
+        flash("Workout nicht gefunden.", "error")
+        return redirect(url_for("workouts_list"))
 
     if request.method == "POST":
-        workout_type = int(request.form["workout_type"])
-        is_strength = workout_type == 1
-        blocks = collect_exercise_blocks(request.form)
+        if save_workout_form(client, workout_id):
+            flash("Änderungen gespeichert.", "success")
+            return redirect(url_for("workout_detail", workout_id=workout_id))
 
-        # 1. Erst ALLES prüfen und umrechnen, dann speichern.
-        #    So entsteht bei einem Tippfehler kein halbes Workout in der DB.
-        entries = []
-        try:
-            for b in blocks:
-                if not b["exercise_id"] and not b["new_name"]:
-                    continue  # leerer Übungsblock -> ignorieren
-                metrics = []  # Liste von (metrik_key, satz_nummer, wert)
-                if is_strength:
-                    set_no = 0
-                    for weight, reps in b["sets"]:
-                        weight, reps = to_float(weight), to_float(reps)
-                        if reps is None:
-                            continue  # Satz ohne Wiederholungen -> leere Zeile
-                        set_no += 1
-                        metrics.append(("reps", set_no, reps))
-                        if weight is not None:  # ohne Gewicht = Körpergewichtsübung
-                            metrics.append(("weight_kg", set_no, weight))
-                else:
-                    for key in ENDURANCE_KEYS:
-                        val = to_float(b["endurance"].get(key))
-                        if val is not None:
-                            metrics.append((key, None, val))
-                entries.append({**b, "metrics": metrics})
-        except ValueError:
-            flash("Bitte bei Gewicht, Wiederholungen und Ausdauerwerten nur Zahlen eingeben.", "error")
-            return render_template("new_workout.html", exercises=exercises.data)
-
-        if not entries:
-            flash("Bitte mindestens eine Übung auswählen oder neu anlegen.", "error")
-            return render_template("new_workout.html", exercises=exercises.data)
-
-        # 2. Workout anlegen
-        workout = client.table("workouts").insert({
-            "user_id": session["user_id"],
-            "workout_type_id": workout_type,
-            "date": request.form.get("date") or str(date.today()),
-            "start_time": request.form.get("start_time") or None,
-            "notes": request.form.get("notes", "").strip() or None,
-        }).execute()
-        workout_id = workout.data[0]["id"]
-
-        # 3. Metrik-IDs einmal holen: {"weight_kg": 1, "reps": 2, ...}
-        metrics = client.table("metric_definitions").select("id, key").execute()
-        metric_map = {m["key"]: m["id"] for m in metrics.data}
-
-        # 4. Pro Übung: ggf. neue Übung anlegen, Entry anlegen, Werte speichern
-        for order, e in enumerate(entries):
-            exercise_id = e["exercise_id"]
-            if not exercise_id:
-                created = client.table("exercises").insert({
-                    "workout_type_id": workout_type,
-                    "name": e["new_name"],
-                    "is_custom": True,
-                    "created_by": session["user_id"],
-                }).execute()
-                exercise_id = created.data[0]["id"]
-
-            entry = client.table("workout_entries").insert({
-                "workout_id": workout_id,
-                "exercise_id": exercise_id,
-                "order_index": order,
-            }).execute()
-            entry_id = entry.data[0]["id"]
-
-            rows = [
-                {"entry_id": entry_id, "metric_definition_id": metric_map[key],
-                 "set_number": set_no, "value": value}
-                for key, set_no, value in e["metrics"]
-            ]
-            if rows:
-                client.table("entry_metrics").insert(rows).execute()
-
-        flash("Workout gespeichert.", "success")
-        return redirect(url_for("workout_detail", workout_id=workout_id))
-
-    return render_template("new_workout.html", exercises=exercises.data)
+    w = build_workout(rows.data[0])
+    return render_template("workout_form.html", exercises=load_exercises(client), workout=w, initial=form_state(w))
 
 
 # ------------------------------------------------------------
