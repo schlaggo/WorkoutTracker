@@ -60,6 +60,22 @@ def login_required(view):
     return wrapped
 
 
+def to_float(value):
+    value = (value or "").strip().replace(",", ".")
+    return float(value) if value else None
+
+
+# Legt die Profil Zeile an, falls sie noch fehlt
+def ensure_profile(client, user):
+    meta = getattr(user, "user_metadata", None) or {}
+    try:
+        client.table("profiles").upsert(
+            {"id": user.id, "display_name": meta.get("display_name") or user.email},
+            ignore_duplicates=True,
+        ).execute()
+    except Exception as e:
+        print(f"[WARN] Profil-Anlage fehlgeschlagen: {e}")
+
 # Eingeloggt -> Dashboard, ansonsten login
 @app.route("/", methods=["GET"])
 def index():
@@ -78,7 +94,11 @@ def signup():
 
         client = get_client()
         try:
-            res = client.auth.sign_up({"email": email, "password": password})
+            res = client.auth.sign_up({
+                "email": email, 
+                "password": password, 
+                "options": {"data":{"display_name": display_name}},
+            })
         except Exception as e:
             flash(f"Signup fehlgeschlagen: {e}", "error")
             return render_template("signup.html")
@@ -86,15 +106,6 @@ def signup():
         if res.user is None:
             flash("Signup fehlgeschlagen. Bitte Eingaben pruefen.", "error")
             return render_template("signup.html")
-
-        try:
-            admin_ctx_client = get_client()
-            admin_ctx_client.table("profiles").upsert({
-                "id": res.user.id,
-                "display_name": display_name,
-            }).execute()
-        except Exception as e:
-            print(f"[WARN] Profil Anlage fehlgeschlagen: {e}")
 
         flash("Account erstellt. Bitte einloggen.", "success")
         return redirect(url_for("login"))
@@ -120,6 +131,8 @@ def login():
         session["refresh_token"] = res.session.refresh_token
         session["user_id"] = res.user.id
         session["email"] = res.user.email
+
+        ensure_profile(get_authenticated_client(res.session.access_token), res.user)
         return redirect(url_for("dashboard"))
 
     return render_template("login.html")
@@ -209,8 +222,13 @@ def new_workout():
         rows = []
         if workout_type == "1":
             for i in range(1, 6):
-                weight = request.form.get(f"set_{i}_weight")
-                reps = request.form.get(f"set_{i}_reps")
+                try:
+                    weight = to_float(request.form.get(f"set_{i}_weight"))
+                    reps = to_float(request.form.get(f"set_{i}_reps"))
+                except ValueError:
+                    flash(f"Satz {i}: bitte nur Zahlen eingeben.", "error")
+                    return redirect(url_for("new_workout"))
+                    
                 if weight and reps:
                     rows.append({
                         "entry_id": entry_id,

@@ -32,11 +32,11 @@
         <div class="set-row">
           <div>
             <label>Satz {{ i }} — Gewicht (kg)</label>
-            <input type="number" step="0.5" name="set_{{ i }}_weight">
+            <input type="text" inputmode="decimal" name="set_{{ i }}_weight" placeholder="kg">
           </div>
           <div>
             <label>Satz {{ i }} — Wiederholungen</label>
-            <input type="number" name="set_{{ i }}_reps">
+            <input type="text" inputmode="numeric" name="set_{{ i }}_reps" placeholder="Wdh">
           </div>
         </div>
       {% endfor %}
