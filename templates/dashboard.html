@@ -2,43 +2,145 @@
 {% block title %}Dashboard{% endblock %}
 {% block content %}
 
-<h1>Hallo, {{ email }}</h1>
-<h1>Hier entsteht ein super Dashboard mit allen Trainingsstatistiken</h1>
+{# Kleiner Helfer: Veränderung zur Vorwoche anzeigen #}
+{% macro delta(new, old, unit='') -%}
+  {%- set diff = new - old -%}
+  {%- if diff > 0 -%}<span class="up">+{{ diff|num }}{{ unit }}</span>
+  {%- elif diff < 0 -%}<span class="down">{{ diff|num }}{{ unit }}</span>
+  {%- else -%}<span class="muted">±0</span>{%- endif %} vs. Vorwoche
+{%- endmacro %}
 
+<div class="page-head">
+  <h1>Übersicht</h1>
+  <a class="btn" href="{{ url_for('new_workout') }}">+ Workout</a>
+</div>
+
+{# ---------- Diese Woche ---------- #}
 <div class="card">
-  <h2>Aktive Ziele</h2>
-  {% if goals %}
-    {% for g in goals %}
-      <div class="workout-row">
-        <strong>
-          {% if g.exercises %}{{ g.exercises.name }} —{% endif %}
-          {{ g.metric_definitions.label }}
-        </strong>
-        <div>Ziel: {{ g.target_value }} {{ g.metric_definitions.unit or '' }}
-          {% if g.target_date %} bis {{ g.target_date }}{% endif %}
-        </div>
-      </div>
+  <div class="workout-card-top">
+    <h2 style="margin:0;">Diese Woche</h2>
+    <span class="muted"><b>{{ training_days_28 }}</b> Trainingstage in 28 Tagen</span>
+  </div>
+  <div class="kpi-grid">
+    <div class="kpi">
+      <span class="muted">Workouts</span>
+      <b>{{ cur.count }}</b>
+      <small>{{ delta(cur.count, prev.count) }}</small>
+    </div>
+    <div class="kpi">
+      <span class="muted">Kraft-Volumen</span>
+      <b>{{ cur.volume|num(0) }} kg</b>
+      <small>{{ delta(cur.volume, prev.volume, ' kg') }}</small>
+    </div>
+    <div class="kpi">
+      <span class="muted">Distanz</span>
+      <b>{{ cur.distance_km|num(1) }} km</b>
+      <small>{{ delta(cur.distance_km, prev.distance_km, ' km') }}</small>
+    </div>
+    <div class="kpi">
+      <span class="muted">Ausdauerzeit</span>
+      <b>{{ cur.duration_s|duration if cur.duration_s else '0:00' }}</b>
+      <small>Vorwoche {{ prev.duration_s|duration }}</small>
+    </div>
+  </div>
+</div>
+
+{# ---------- Hinweise ---------- #}
+{% if hints %}
+  <div class="card hints">
+    <h2>Hinweise</h2>
+    <ul>
+      {% for h in hints %}<li>{{ h }}</li>{% endfor %}
+    </ul>
+  </div>
+{% endif %}
+
+{# ---------- Letzte 8 Wochen (Balken als SVG) ---------- #}
+<div class="card">
+  <h2>Trainings pro Woche</h2>
+  <svg class="week-chart" viewBox="0 0 320 140" role="img" aria-label="Trainings pro Woche, letzte 8 Wochen">
+    {% for h in history %}
+      {% set x = loop.index0 * 40 + 8 %}
+      {% set hs = h.strength / max_per_week * 90 %}
+      {% set he = h.endurance / max_per_week * 90 %}
+      <rect x="{{ x }}" y="{{ 112 - hs }}" width="24" height="{{ hs }}" fill="#2f6fed" rx="3"/>
+      <rect x="{{ x }}" y="{{ 112 - hs - he }}" width="24" height="{{ he }}" fill="#3aa35b" rx="3"/>
+      <text x="{{ x + 12 }}" y="130" text-anchor="middle" font-size="10" fill="#777">{{ h.label[3:] }}</text>
+      {% if h.strength + h.endurance %}
+        <text x="{{ x + 12 }}" y="{{ 107 - hs - he }}" text-anchor="middle" font-size="10" fill="#1a1a1a">{{ h.strength + h.endurance }}</text>
+      {% endif %}
     {% endfor %}
+  </svg>
+  <div class="legend">
+    <span><i class="dot strength"></i>Kraft</span>
+    <span><i class="dot endurance"></i>Ausdauer</span>
+    <span class="muted">Zahl unten = Kalenderwoche</span>
+  </div>
+</div>
+
+{# ---------- Entwicklung ---------- #}
+<div class="card">
+  <h2>Entwicklung</h2>
+  <p class="muted" style="margin-top:0;">Letzte 4 Wochen im Vergleich zu den 4 Wochen davor</p>
+  {% if trends %}
+    <table class="sets-table">
+      {% for t in trends %}
+        <tr>
+          <td><span class="dot {{ t.kind }}"></span> {{ t.name }}</td>
+          <td style="text-align:right;">
+            {% if t.kind == 'strength' %}{{ t.value|num(1) }}{% else %}{{ t.value|pace }}{% endif %}
+            <span class="muted">{{ t.unit }}</span>
+          </td>
+          <td style="text-align:right;width:70px;">
+            {% if t.change is none %}<span class="muted">neu</span>
+            {% elif t.change > 0 %}<span class="up">↑ {{ t.change }} %</span>
+            {% elif t.change < 0 %}<span class="down">↓ {{ -t.change }} %</span>
+            {% else %}<span class="muted">± 0 %</span>{% endif %}
+          </td>
+        </tr>
+      {% endfor %}
+    </table>
   {% else %}
-    <p>Noch keine Ziele gesetzt.</p>
+    <p>Noch zu wenige Daten. Nach ein paar Workouts siehst du hier, ob du besser wirst.</p>
   {% endif %}
 </div>
 
+{# ---------- Aktive Ziele ---------- #}
 <div class="card">
-  <h2>Letzte Workouts</h2>
-  {% if workouts %}
-    {% for w in workouts %}
-      <div class="workout-row">
-        <span class="tag">{{ w.workout_types.label }}</span>
-        <strong>{{ w.date }}</strong>
-        {% if w.notes %}<div>{{ w.notes }}</div>{% endif %}
+  <div class="workout-card-top">
+    <h2 style="margin:0;">Aktive Ziele</h2>
+    <a class="muted" href="{{ url_for('goals_list') }}">Alle →</a>
+  </div>
+  {% for g in goals %}
+    <a class="goal-row" href="{{ url_for('goal_detail', goal_id=g.id) }}">
+      <div class="workout-card-top">
+        <strong>{{ g.title }}</strong>
+        {% if g.days_left is not none and g.days_left >= 0 %}<span class="muted">noch {{ g.days_left }} Tage</span>{% endif %}
       </div>
-    {% endfor %}
+      {% if g.progress %}
+        <progress class="progress" value="{{ g.progress.percent }}" max="100"></progress>
+      {% endif %}
+    </a>
   {% else %}
-    <p>Noch keine Workouts erfasst.</p>
-  {% endif %}
+    <p class="muted">Keine aktiven Ziele. <a href="{{ url_for('new_goal') }}">Ziel anlegen</a></p>
+  {% endfor %}
 </div>
 
-<a class="btn" href="{{ url_for('new_workout') }}">+ Neues Workout erfassen</a>
+{# ---------- Letzte Workouts ---------- #}
+<div class="workout-card-top" style="margin:24px 0 8px;">
+  <h2 class="month-title" style="margin:0;">Letzte Workouts</h2>
+  <a class="muted" href="{{ url_for('workouts_list') }}">Alle →</a>
+</div>
+{% for w in recent %}
+  <a class="card workout-card" href="{{ url_for('workout_detail', workout_id=w.id) }}">
+    <div class="workout-card-top">
+      <strong>{{ w.date|weekday_date }}{% if w.start_time %} · {{ w.start_time }}{% endif %}</strong>
+      <span class="tag {{ w.type_key }}">{{ w.type_label }}</span>
+    </div>
+    <div class="muted">{{ w.entries|map(attribute='name')|join(' · ') }}</div>
+  </a>
+{% else %}
+  <div class="card"><p>Noch keine Workouts. <a href="{{ url_for('new_workout') }}">Erstes Workout erfassen</a></p></div>
+{% endfor %}
 
 {% endblock %}

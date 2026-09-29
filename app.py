@@ -1,7 +1,7 @@
 import os
 import re
 import time
-from datetime import date
+from datetime import date, timedelta
 
 import jwt
 from flask import Flask, render_template, request, redirect, session, url_for, flash
@@ -276,34 +276,6 @@ def login():
 def logout():
     session.clear()
     return redirect(url_for("login"))
-
-# Dashboard anzeigen mit Workouts und Goals
-@app.route("/dashboard")
-@login_required
-def dashboard():
-    client = current_client()
-
-    workouts = (
-        client.table("workouts")
-        .select("id, date, notes, workout_types(label)")
-        .order("date", desc=True)
-        .limit(20)
-        .execute()
-    )
-
-    goals = (
-        client.table("goals")
-        .select("id, target_value, target_date, status, metric_definitions(label, unit), exercises(name)")
-        .eq("status", "active")
-        .execute()
-    )
-
-    return render_template(
-        "dashboard.html",
-        workouts=workouts.data,
-        goals=goals.data,
-        email=session.get("email"),
-    )
 
 # ------------------------------------------------------------
 # Workout anlegen / bearbeiten (gemeinsame Logik, gleiches Formular)
@@ -668,6 +640,166 @@ def delete_goal(goal_id):
     return redirect(url_for("goals_list"))
 
 
+# ------------------------------------------------------------
+# Dashboard: Wochenübersicht, Verlauf, Entwicklung, Ziele, Hinweise
+# ------------------------------------------------------------
+def week_start(d):
+    """Montag der Woche, in der d liegt."""
+    return d - timedelta(days=d.weekday())
+
+
+def e1rm(weight, reps):
+    """Geschätztes 1-Wiederholungs-Maximum (Epley-Formel). Macht Sätze mit
+    unterschiedlichen Wiederholungszahlen vergleichbar: 80 kg x 5 ≈ 93 kg."""
+    if not weight or not reps:
+        return None
+    return weight if reps == 1 else weight * (1 + reps / 30)
+
+
+def percent_change(new, old):
+    if not new or not old:
+        return None
+    return round((new - old) / old * 100)
+
+
+def totals(workouts):
+    return {
+        "count": len(workouts),
+        "volume": sum(w["summary"]["volume"] for w in workouts),
+        "distance_km": sum(w["summary"]["distance_km"] for w in workouts),
+        "duration_s": sum(w["summary"]["duration_s"] for w in workouts),
+    }
+
+
+def weekly_history(workouts, today, weeks=8):
+    """Anzahl Kraft- und Ausdauer-Workouts pro Woche (älteste zuerst)."""
+    this_monday = week_start(today)
+    result = []
+    for i in range(weeks - 1, -1, -1):
+        start = this_monday - timedelta(weeks=i)
+        in_week = [w for w in workouts if start <= w["date"] < start + timedelta(days=7)]
+        result.append({
+            "label": f"KW {start.isocalendar()[1]}",
+            "strength": sum(1 for w in in_week if w["type_key"] == "strength"),
+            "endurance": sum(1 for w in in_week if w["type_key"] != "strength"),
+        })
+    return result
+
+
+def exercise_trends(workouts, today):
+    """Entwicklung pro Übung: letzte 4 Wochen vs. die 4 Wochen davor.
+    Kraft: bestes e1RM (bei Körpergewicht: meiste Wiederholungen).
+    Ausdauer: Ø Pace (Sekunden pro km, weniger = schneller).
+    """
+    recent_from = today - timedelta(days=27)
+    prev_from = today - timedelta(days=55)
+    data = {}
+    for w in workouts:
+        period = "recent" if w["date"] >= recent_from else "prev" if w["date"] >= prev_from else None
+        if not period:
+            continue
+        for e in w["entries"]:
+            d = data.setdefault(e["name"], {
+                "name": e["name"], "last": w["date"], "kind": "strength" if e["sets"] else "endurance",
+                "recent": [], "prev": [], "km": 0, "sec": {"recent": 0, "prev": 0}, "dist": {"recent": 0, "prev": 0},
+            })
+            d["last"] = max(d["last"], w["date"])
+            if e["sets"]:
+                has_weight = any("weight_kg" in s for s in e["sets"])
+                for s in e["sets"]:
+                    value = e1rm(s.get("weight_kg"), s.get("reps")) if has_weight else s.get("reps")
+                    if value:
+                        d[period].append(value)
+                d["unit"] = "kg (e1RM)" if has_weight else "Wdh."
+            else:
+                km, sec = e["endurance"].get("distance_km"), e["endurance"].get("duration_s")
+                if km and sec:
+                    d["dist"][period] += km
+                    d["sec"][period] += sec
+
+    trends = []
+    for d in sorted(data.values(), key=lambda x: x["last"], reverse=True):
+        if d["kind"] == "strength":
+            recent = max(d["recent"], default=None)
+            prev = max(d["prev"], default=None)
+            change = percent_change(recent, prev)
+        else:
+            recent = d["sec"]["recent"] / d["dist"]["recent"] if d["dist"]["recent"] else None
+            prev = d["sec"]["prev"] / d["dist"]["prev"] if d["dist"]["prev"] else None
+            change = percent_change(prev, recent)  # Pace: kleiner = besser -> Richtung umdrehen
+            d["unit"] = "/km"
+        if recent is None:
+            continue
+        trends.append({"name": d["name"], "kind": d["kind"], "value": recent, "change": change, "unit": d["unit"]})
+    return trends
+
+
+def build_hints(workouts, trends, goals, today):
+    """Einfache Regeln -> Hinweise, was du anpassen könntest."""
+    hints = []
+
+    # 1) Pause erkennen
+    last = max((w["date"] for w in workouts), default=None)
+    if last and (today - last).days >= 7:
+        hints.append(f"Dein letztes Workout ist {(today - last).days} Tage her. Plane die nächste Einheit fix ein.")
+
+    # 2) Hybrid-Balance der letzten 14 Tage
+    recent = [w for w in workouts if w["date"] >= today - timedelta(days=13)]
+    if recent:
+        if not any(w["type_key"] == "strength" for w in recent):
+            hints.append("In den letzten 2 Wochen kein Krafttraining. Eine Einheit hält deine Kraftwerte stabil.")
+        if not any(w["type_key"] != "strength" for w in recent):
+            hints.append("In den letzten 2 Wochen kein Ausdauertraining. Schon 1–2 lockere Einheiten erhalten die Grundausdauer.")
+
+    # 3) Stagnation / Rückschritt je Übung
+    for t in trends:
+        if t["change"] is not None and t["change"] <= 0:
+            if t["kind"] == "strength":
+                hints.append(f"{t['name']}: kein Fortschritt zu den 4 Wochen davor ({t['change']:+d} %). "
+                             "Versuch einen anderen Wiederholungsbereich, mehr Sätze oder eine leichtere Woche zur Erholung.")
+            else:
+                hints.append(f"{t['name']}: Pace nicht besser als in den 4 Wochen davor ({t['change']:+d} %). "
+                             "Mehr lockere Umfänge oder eine gezielte Tempo-Einheit pro Woche können helfen.")
+
+    # 4) Ziele mit knapper Zeit
+    for g in goals:
+        p, days = g.get("progress"), g.get("days_left")
+        if p and not p["reached"] and days is not None and 0 <= days <= 28 and p["percent"] < 80:
+            hints.append(f"Ziel „{g['title']}“: noch {days} Tage, erst {p['percent']} % erreicht. "
+                         "Setz den Fokus der nächsten Einheiten darauf oder passe Zielwert/Datum an.")
+    return hints
+
+
+@app.route("/dashboard")
+@login_required
+def dashboard():
+    client = current_client()
+    today = date.today()
+    workouts = load_all_workouts(client)
+
+    this_monday = week_start(today)
+    this_week = [w for w in workouts if w["date"] >= this_monday]
+    last_week = [w for w in workouts if this_monday - timedelta(days=7) <= w["date"] < this_monday]
+
+    goals = client.table("goals").select(GOAL_SELECT).eq("status", "active").execute().data
+    goals = [enrich_goal(g, workouts) for g in goals]
+    trends = exercise_trends(workouts, today)
+
+    history = weekly_history(workouts, today)
+    max_per_week = max([h["strength"] + h["endurance"] for h in history] + [1])
+
+    return render_template(
+        "dashboard.html",
+        cur=totals(this_week),
+        prev=totals(last_week),
+        history=history,
+        max_per_week=max_per_week,
+        trends=trends[:8],
+        goals=goals,
+        hints=build_hints(workouts, trends, goals, today),
+        recent=sorted(workouts, key=lambda w: w["date"], reverse=True)[:3],
+        training_days_28=len({w["date"] for w in workouts if w["date"] > today - timedelta(days=28)}),
+    )
 
 
 

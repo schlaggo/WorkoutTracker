@@ -117,3 +117,25 @@ button.danger:hover { background: #fcebeb; }
 .checkbox-row { display: flex !important; align-items: center; gap: 8px; margin-top: 18px !important; color: #1a1a1a !important; font-size: 14px !important; }
 .checkbox-row input { width: auto; }
 
+
+
+
+/* ---------- Dashboard ---------- */
+.kpi-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 12px; }
+.kpi { background: #f4f5f7; border-radius: 8px; padding: 12px; }
+.kpi span, .kpi small { display: block; font-size: 12px; }
+.kpi b { display: block; font-size: 22px; margin: 4px 0 2px; }
+.kpi small { color: #777; }
+.up { color: #27500a; font-weight: 600; }
+.down { color: #b42318; font-weight: 600; }
+.hints { border-left: 4px solid #f2b705; }
+.hints ul { margin: 0; padding-left: 18px; }
+.hints li { margin: 6px 0; font-size: 14px; }
+.week-chart { width: 100%; height: auto; display: block; }
+.legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: 12px; margin-top: 6px; }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: #999; }
+.dot.strength { background: #2f6fed; }
+.dot.endurance { background: #3aa35b; }
+.goal-row { display: block; color: inherit; text-decoration: none; padding: 10px 0; border-bottom: 1px solid #eee; }
+.goal-row:last-child { border-bottom: none; }
