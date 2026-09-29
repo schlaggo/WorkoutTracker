@@ -63,3 +63,15 @@ button:hover, .btn:hover { background: #1b4fb0; }
   flex: 1; text-align: center; border: 1px solid #d5d9e3;
   border-radius: 6px; padding: 10px; cursor: pointer; margin: 0;
 }
+
+
+/* ---------- Übungsblöcke im Workout-Formular ---------- */
+.exercise-block { border: 1px solid #e3e6ee; border-radius: 8px; padding: 14px; margin-top: 14px; }
+.exercise-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+button.secondary { background: #eef2fb; color: #2f6fed; }
+button.secondary:hover { background: #dfe7f8; }
+button.small { padding: 6px 12px; font-size: 13px; margin-top: 10px; }
+.link-btn { background: none; color: #b42318; padding: 0; margin: 0; font-size: 13px; }
+.link-btn:hover { background: none; text-decoration: underline; }
+
+

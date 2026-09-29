@@ -1,5 +1,5 @@
 import os
-import os
+import re
 import time
 from datetime import date
 
@@ -59,10 +59,31 @@ def login_required(view):
 
     return wrapped
 
-
+# Ermöglicht float eingaben beim Workout erfassung
 def to_float(value):
     value = (value or "").strip().replace(",", ".")
     return float(value) if value else None
+
+ENDURANCE_KEYS = ["distance_km", "duration_s", "elevation_m", "heart_rate_avg"]
+
+def collect_exercise_blocks(form):
+    """Liest alle Übungsblöcke aus dem Formular.
+
+    Feldnamen: ex_<n>_id, ex_<n>_new_name, ex_<n>_set_<m>_weight, ex_<n>_set_<m>_reps,
+    ex_<n>_distance_km usw. <n> = Nummer der Übung, <m> = Nummer des Satzes.
+    """
+    keys = list(form.keys())
+    indices = sorted({int(m.group(1)) for k in keys if (m := re.match(r"ex_(\d+)_id$", k))})
+    blocks = []
+    for n in indices:
+        set_nums = sorted({int(m.group(1)) for k in keys if (m := re.match(rf"ex_{n}_set_(\d+)_reps$", k))})
+        blocks.append({
+            "exercise_id": form.get(f"ex_{n}_id") or None,
+            "new_name": form.get(f"ex_{n}_new_name", "").strip(),
+            "sets": [(form.get(f"ex_{n}_set_{m}_weight"), form.get(f"ex_{n}_set_{m}_reps")) for m in set_nums],
+            "endurance": {key: form.get(f"ex_{n}_{key}") for key in ENDURANCE_KEYS},
+        })
+    return blocks
 
 
 # Legt die Profil Zeile an, falls sie noch fehlt
@@ -173,100 +194,95 @@ def dashboard():
     )
 
 
-# Neues Workout erstellen
+# Neues Workout erstellen (mehrere Übungen, beliebig viele Sätze)
 @app.route("/workouts/new", methods=["GET", "POST"])
 @login_required
 def new_workout():
     client = current_client()
-
-    exercises = client.table("exercises").select("id, name, workout_type_id").execute()
+    exercises = client.table("exercises").select("id, name, workout_type_id").order("name").execute()
 
     if request.method == "POST":
-        workout_type = request.form["workout_type"]
-        exercise_id = request.form.get("exercise_id")
-        new_exercise_name = request.form.get("new_exercise_name", "").strip()
-        notes = request.form.get("notes", "").strip()
+        workout_type = int(request.form["workout_type"])
+        is_strength = workout_type == 1
+        blocks = collect_exercise_blocks(request.form)
 
-        if not exercise_id and new_exercise_name:
-            created = client.table("exercises").insert({
-                "workout_type_id": int(workout_type),
-                "name": new_exercise_name,
-                "is_custom": True,
-                "created_by": session["user_id"],
-            }).execute()
-            exercise_id = created.data[0]["id"]
+        # 1. Erst ALLES prüfen und umrechnen, dann speichern.
+        #    So entsteht bei einem Tippfehler kein halbes Workout in der DB.
+        entries = []
+        try:
+            for b in blocks:
+                if not b["exercise_id"] and not b["new_name"]:
+                    continue  # leerer Übungsblock -> ignorieren
+                metrics = []  # Liste von (metrik_key, satz_nummer, wert)
+                if is_strength:
+                    set_no = 0
+                    for weight, reps in b["sets"]:
+                        weight, reps = to_float(weight), to_float(reps)
+                        if reps is None:
+                            continue  # Satz ohne Wiederholungen -> leere Zeile
+                        set_no += 1
+                        metrics.append(("reps", set_no, reps))
+                        if weight is not None:  # ohne Gewicht = Körpergewichtsübung
+                            metrics.append(("weight_kg", set_no, weight))
+                else:
+                    for key in ENDURANCE_KEYS:
+                        val = to_float(b["endurance"].get(key))
+                        if val is not None:
+                            metrics.append((key, None, val))
+                entries.append({**b, "metrics": metrics})
+        except ValueError:
+            flash("Bitte bei Gewicht, Wiederholungen und Ausdauerwerten nur Zahlen eingeben.", "error")
+            return render_template("new_workout.html", exercises=exercises.data)
 
+        if not entries:
+            flash("Bitte mindestens eine Übung auswählen oder neu anlegen.", "error")
+            return render_template("new_workout.html", exercises=exercises.data)
+
+        # 2. Workout anlegen
         workout = client.table("workouts").insert({
             "user_id": session["user_id"],
-            "workout_type_id": int(workout_type),
+            "workout_type_id": workout_type,
             "date": request.form.get("date") or str(date.today()),
-            "notes": notes or None,
+            "start_time": request.form.get("start_time") or None,
+            "notes": request.form.get("notes", "").strip() or None,
         }).execute()
         workout_id = workout.data[0]["id"]
 
-        entry = client.table("workout_entries").insert({
-            "workout_id": workout_id,
-            "exercise_id": exercise_id,
-            "order_index": 0,
-        }).execute()
-        entry_id = entry.data[0]["id"]
-
-        if workout_type == "1":
-            metric_keys = ["weight_kg", "reps"]
-        else:
-            metric_keys = ["distance_km", "duration_s", "elevation_m", "heart_rate_avg"]
-
-        metrics = client.table("metric_definitions").select("id, key").in_("key", metric_keys).execute()
+        # 3. Metrik-IDs einmal holen: {"weight_kg": 1, "reps": 2, ...}
+        metrics = client.table("metric_definitions").select("id, key").execute()
         metric_map = {m["key"]: m["id"] for m in metrics.data}
 
-        rows = []
-        if workout_type == "1":
-            for i in range(1, 6):
-                try:
-                    weight = to_float(request.form.get(f"set_{i}_weight"))
-                    reps = to_float(request.form.get(f"set_{i}_reps"))
-                except ValueError:
-                    flash(f"Satz {i}: bitte nur Zahlen eingeben.", "error")
-                    return redirect(url_for("new_workout"))
-                    
-                if weight and reps:
-                    rows.append({
-                        "entry_id": entry_id,
-                        "metric_definition_id": metric_map["weight_kg"],
-                        "set_number": i,
-                        "value": float(weight),
-                    })
-                    rows.append({
-                        "entry_id": entry_id,
-                        "metric_definition_id": metric_map["reps"],
-                        "set_number": i,
-                        "value": float(reps),
-                    })
-        else:
-            field_to_key = {
-                "distance_km": "distance_km",
-                "duration_s": "duration_s",
-                "elevation_m": "elevation_m",
-                "heart_rate_avg": "heart_rate_avg",
-            }
-            for field, key in field_to_key.items():
-                val = request.form.get(field)
-                if val:
-                    rows.append({
-                        "entry_id": entry_id,
-                        "metric_definition_id": metric_map[key],
-                        "set_number": None,
-                        "value": float(val),
-                    })
+        # 4. Pro Übung: ggf. neue Übung anlegen, Entry anlegen, Werte speichern
+        for order, e in enumerate(entries):
+            exercise_id = e["exercise_id"]
+            if not exercise_id:
+                created = client.table("exercises").insert({
+                    "workout_type_id": workout_type,
+                    "name": e["new_name"],
+                    "is_custom": True,
+                    "created_by": session["user_id"],
+                }).execute()
+                exercise_id = created.data[0]["id"]
 
-        if rows:
-            client.table("entry_metrics").insert(rows).execute()
+            entry = client.table("workout_entries").insert({
+                "workout_id": workout_id,
+                "exercise_id": exercise_id,
+                "order_index": order,
+            }).execute()
+            entry_id = entry.data[0]["id"]
+
+            rows = [
+                {"entry_id": entry_id, "metric_definition_id": metric_map[key],
+                 "set_number": set_no, "value": value}
+                for key, set_no, value in e["metrics"]
+            ]
+            if rows:
+                client.table("entry_metrics").insert(rows).execute()
 
         flash("Workout gespeichert.", "success")
         return redirect(url_for("dashboard"))
 
     return render_template("new_workout.html", exercises=exercises.data)
-
 
 if __name__ == "__main__":
     app.run(debug=True)
