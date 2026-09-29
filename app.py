@@ -483,6 +483,192 @@ def delete_workout(workout_id):
     return redirect(url_for("workouts_list"))
 
 
+# ------------------------------------------------------------
+# Ziele (Goals): Liste, Detailansicht, Anlegen, Bearbeiten, Löschen
+# ------------------------------------------------------------
+GOAL_TYPES = {"event": "Event", "skill": "Skill", "general": "Allgemein"}
+GOAL_STATUS = {"active": "Aktiv", "achieved": "Erreicht", "abandoned": "Verworfen"}
+
+GOAL_SELECT = (
+    "id, title, goal_type, description, target_date, target_value, status, created_at, "
+    "metric_definition_id, exercise_id, metric_definitions(key, label, unit), exercises(name)"
+)
+
+
+@app.context_processor
+def goal_labels():
+    """Macht GOAL_TYPES und GOAL_STATUS in allen Templates verfügbar."""
+    return {"GOAL_TYPES": GOAL_TYPES, "GOAL_STATUS": GOAL_STATUS}
+
+
+def load_all_workouts(client):
+    rows = client.table("workouts").select(WORKOUT_SELECT).order("date").execute()
+    return [build_workout(r) for r in rows.data]
+
+
+def goal_progress(goal, workouts):
+    """Bester erreichter Wert für ein messbares Ziel + Fortschritt in Prozent.
+
+    Sucht in allen Workouts (optional nur in der gewählten Übung) den besten Wert
+    der Metrik. Bei Dauer ist weniger besser, bei allem anderen mehr.
+    Rückgabe: None (nicht messbar) oder {best, target, percent, reached}
+    """
+    metric = goal.get("metric_definitions")
+    if not metric or goal.get("target_value") is None:
+        return None
+
+    key = metric["key"]
+    values = []
+    for w in workouts:
+        for e in w["entries"]:
+            if goal["exercise_id"] and e["exercise_id"] != goal["exercise_id"]:
+                continue
+            values += [s[key] for s in e["sets"] if key in s]
+            if key in e["endurance"]:
+                values.append(e["endurance"][key])
+
+    target = float(goal["target_value"])
+    if not values:
+        return {"best": None, "target": target, "percent": 0, "reached": False}
+
+    lower_is_better = key == "duration_s"
+    best = min(values) if lower_is_better else max(values)
+    ratio = (target / best if best else 0) if lower_is_better else best / target
+    return {
+        "best": best,
+        "target": target,
+        "percent": round(min(ratio, 1) * 100),
+        "reached": ratio >= 1,
+    }
+
+
+def enrich_goal(goal, workouts):
+    """Ergänzt ein Ziel um Fortschritt und verbleibende Tage."""
+    goal["progress"] = goal_progress(goal, workouts)
+    goal["target_day"] = date.fromisoformat(goal["target_date"]) if goal.get("target_date") else None
+    goal["days_left"] = (goal["target_day"] - date.today()).days if goal["target_day"] else None
+    return goal
+
+
+def parse_goal_form(form):
+    """Liest das Ziel-Formular. Rückgabe: (daten_für_db, fehlermeldung)"""
+    row = {
+        "title": form.get("title", "").strip(),
+        "goal_type": form.get("goal_type", "general"),
+        "description": form.get("description", "").strip() or None,
+        "target_date": form.get("target_date") or None,
+        "status": form.get("status", "active"),
+        "metric_definition_id": None,
+        "exercise_id": None,
+        "target_value": None,
+    }
+    if not row["title"]:
+        return None, "Bitte einen Titel eingeben."
+    if row["goal_type"] not in GOAL_TYPES or row["status"] not in GOAL_STATUS:
+        return None, "Ungültige Auswahl."
+
+    if form.get("measurable"):  # optional: Ziel an Metrik + Zielwert koppeln
+        try:
+            row["target_value"] = to_float(form.get("target_value"))
+        except ValueError:
+            return None, "Der Zielwert muss eine Zahl sein."
+        row["metric_definition_id"] = int(form.get("metric_definition_id") or 0) or None
+        row["exercise_id"] = form.get("exercise_id") or None
+        if not row["metric_definition_id"] or row["target_value"] is None:
+            return None, "Für ein messbares Ziel brauchst du Metrik und Zielwert."
+    return row, None
+
+
+def render_goal_form(client, goal):
+    metrics = client.table("metric_definitions").select("id, label, unit, key").order("id").execute().data
+    return render_template(
+        "goal_form.html",
+        goal=goal,
+        metrics=[m for m in metrics if m["key"] != "rpe"],
+        exercises=load_exercises(client),
+    )
+
+
+@app.route("/goals")
+@login_required
+def goals_list():
+    client = current_client()
+    workouts = load_all_workouts(client)
+    goals = client.table("goals").select(GOAL_SELECT).order("created_at", desc=True).execute().data
+    goals = [enrich_goal(g, workouts) for g in goals]
+    return render_template(
+        "goals.html",
+        active=[g for g in goals if g["status"] == "active"],
+        finished=[g for g in goals if g["status"] != "active"],
+    )
+
+
+@app.route("/goals/new", methods=["GET", "POST"])
+@login_required
+def new_goal():
+    client = current_client()
+    if request.method == "POST":
+        row, error = parse_goal_form(request.form)
+        if error:
+            flash(error, "error")
+        else:
+            row["user_id"] = session["user_id"]
+            created = client.table("goals").insert(row).execute()
+            flash("Ziel gespeichert.", "success")
+            return redirect(url_for("goal_detail", goal_id=created.data[0]["id"]))
+    return render_goal_form(client, goal=None)
+
+
+@app.route("/goals/<goal_id>")
+@login_required
+def goal_detail(goal_id):
+    client = current_client()
+    rows = client.table("goals").select(GOAL_SELECT).eq("id", goal_id).execute()
+    if not rows.data:
+        flash("Ziel nicht gefunden.", "error")
+        return redirect(url_for("goals_list"))
+    return render_template("goal_detail.html", g=enrich_goal(rows.data[0], load_all_workouts(client)))
+
+
+@app.route("/goals/<goal_id>/edit", methods=["GET", "POST"])
+@login_required
+def edit_goal(goal_id):
+    client = current_client()
+    rows = client.table("goals").select(GOAL_SELECT).eq("id", goal_id).execute()
+    if not rows.data:
+        flash("Ziel nicht gefunden.", "error")
+        return redirect(url_for("goals_list"))
+
+    if request.method == "POST":
+        row, error = parse_goal_form(request.form)
+        if error:
+            flash(error, "error")
+        else:
+            client.table("goals").update(row).eq("id", goal_id).execute()
+            flash("Änderungen gespeichert.", "success")
+            return redirect(url_for("goal_detail", goal_id=goal_id))
+    return render_goal_form(client, goal=rows.data[0])
+
+
+@app.route("/goals/<goal_id>/status", methods=["POST"])
+@login_required
+def goal_status(goal_id):
+    status = request.form.get("status")
+    if status in GOAL_STATUS:
+        current_client().table("goals").update({"status": status}).eq("id", goal_id).execute()
+        flash(f"Ziel ist jetzt: {GOAL_STATUS[status]}.", "success")
+    return redirect(url_for("goal_detail", goal_id=goal_id))
+
+
+@app.route("/goals/<goal_id>/delete", methods=["POST"])
+@login_required
+def delete_goal(goal_id):
+    current_client().table("goals").delete().eq("id", goal_id).execute()
+    flash("Ziel gelöscht.", "success")
+    return redirect(url_for("goals_list"))
+
+
+
 
 
 if __name__ == "__main__":

@@ -103,5 +103,17 @@ button.danger:hover { background: #fcebeb; }
 
 
 
-
+/* ---------- Ziele ---------- */
+.progress {
+  display: block; width: 100%; height: 8px; margin-top: 8px;
+  border: none; border-radius: 99px; overflow: hidden;
+  background: #e6e9f0; -webkit-appearance: none; appearance: none;
+}
+.progress::-webkit-progress-bar { background: #e6e9f0; border-radius: 99px; }
+.progress::-webkit-progress-value { background: #2f6fed; border-radius: 99px; }
+.progress::-moz-progress-bar { background: #2f6fed; border-radius: 99px; }
+.tag.goal-event { background: #fdf1d8; color: #7a4b00; }
+.tag.goal-skill { background: #efe7fb; color: #4b2a85; }
+.checkbox-row { display: flex !important; align-items: center; gap: 8px; margin-top: 18px !important; color: #1a1a1a !important; font-size: 14px !important; }
+.checkbox-row input { width: auto; }
 

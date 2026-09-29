@@ -13,7 +13,7 @@
       {% if session.get('user_id') %}
         <a href="{{ url_for('dashboard') }}">Dashboard</a>
         <a href="{{ url_for('workouts_list') }}">Workouts</a>
-        <a href="{{ url_for('new_workout') }}">+ Workout</a>
+        <a href="{{ url_for('goals_list') }}">Goals</a>
         <a href="{{ url_for('logout') }}">Logout</a>
       {% else %}
         <a href="{{ url_for('login') }}">Login</a>

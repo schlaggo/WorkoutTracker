@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Ziel bearbeiten' if goal else 'Neues Ziel' }}{% endblock %}
+{% block content %}
+
+{% if goal %}
+  <a class="back-link" href="{{ url_for('goal_detail', goal_id=goal.id) }}">← Zurück zum Ziel</a>
+{% else %}
+  <a class="back-link" href="{{ url_for('goals_list') }}">← Alle Ziele</a>
+{% endif %}
+
+{# g = bestehendes Ziel beim Bearbeiten, sonst leere Standardwerte #}
+{% set g = goal or {'goal_type': 'general', 'status': 'active'} %}
+
+<div class="card">
+  <h1>{{ 'Ziel bearbeiten' if goal else 'Neues Ziel' }}</h1>
+  <form method="post">
+
+    <label>Art des Ziels</label>
+    <div class="toggle-group">
+      {% for key, label in GOAL_TYPES.items() %}
+        <label><input type="radio" name="goal_type" value="{{ key }}" {{ 'checked' if g.goal_type == key }}> {{ label }}</label>
+      {% endfor %}
+    </div>
+
+    <label for="title">Titel</label>
+    <input type="text" name="title" id="title" required value="{{ g.title or '' }}"
+           placeholder="z.B. Wien Marathon, Handstand Push-Ups, Grundausdauer verbessern">
+
+    <label for="target_date">Zieldatum / Eventdatum (optional)</label>
+    <input type="date" name="target_date" id="target_date" value="{{ g.target_date or '' }}">
+
+    <label for="description">Beschreibung (optional)</label>
+    <textarea name="description" id="description" rows="3">{{ g.description or '' }}</textarea>
+
+    <label class="checkbox-row">
+      <input type="checkbox" name="measurable" id="measurable" value="1" {{ 'checked' if g.metric_definition_id }}>
+      Messbar machen (Fortschritt automatisch aus deinen Workouts)
+    </label>
+
+    <div id="measure-fields" {{ '' if g.metric_definition_id else 'hidden' }}>
+      <label for="metric">Metrik</label>
+      <select name="metric_definition_id" id="metric">
+        <option value="">-- Metrik wählen --</option>
+        {% for m in metrics %}
+          <option value="{{ m.id }}" {{ 'selected' if g.metric_definition_id == m.id }}>{{ m.label }}{% if m.unit %} ({{ m.unit }}){% endif %}</option>
+        {% endfor %}
+      </select>
+
+      <label for="exercise">Übung (optional)</label>
+      <select name="exercise_id" id="exercise">
+        <option value="">-- alle Übungen --</option>
+        {% for ex in exercises %}
+          <option value="{{ ex.id }}" {{ 'selected' if g.exercise_id == ex.id }}>{{ ex.name }}</option>
+        {% endfor %}
+      </select>
+
+      <label for="target_value">Zielwert</label>
+      <input type="text" inputmode="decimal" name="target_value" id="target_value"
+             value="{{ g.target_value|num(2) if g.target_value is not none and g.target_value is defined else '' }}"
+             placeholder="z.B. 100">
+      <p class="muted">Beispiel: Bankdrücken · Gewicht · 100 &nbsp;|&nbsp; Laufen · Distanz · 42,2</p>
+    </div>
+
+    {% if goal %}
+      <label>Status</label>
+      <div class="toggle-group">
+        {% for key, label in GOAL_STATUS.items() %}
+          <label><input type="radio" name="status" value="{{ key }}" {{ 'checked' if g.status == key }}> {{ label }}</label>
+        {% endfor %}
+      </div>
+    {% endif %}
+
+    <button type="submit" style="display:block;width:100%;">
+      {{ 'Änderungen speichern' if goal else 'Ziel speichern' }}
+    </button>
+  </form>
+</div>
+
+<script>
+// "Messbar machen" blendet die Felder für Metrik, Übung und Zielwert ein/aus
+const measurable = document.getElementById('measurable');
+measurable.addEventListener('change', () => {
+  document.getElementById('measure-fields').hidden = !measurable.checked;
+});
+</script>
+
+{% endblock %}

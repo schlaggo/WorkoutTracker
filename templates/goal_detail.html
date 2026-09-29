@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}{{ g.title }}{% endblock %}
+{% block content %}
+
+<a class="back-link" href="{{ url_for('goals_list') }}">← Alle Ziele</a>
+
+<div class="card">
+  <div class="workout-card-top">
+    <h1 style="margin:0;font-size:24px;">{{ g.title }}</h1>
+    <span class="tag goal-{{ g.goal_type }}">{{ GOAL_TYPES[g.goal_type] }}</span>
+  </div>
+  <div class="muted">Status: {{ GOAL_STATUS[g.status] }}</div>
+
+  {% if g.target_date %}
+    <div class="value-grid" style="margin-top:14px;">
+      <div><span class="muted">{{ 'Eventdatum' if g.goal_type == 'event' else 'Zieldatum' }}</span><b>{{ g.target_day|long_date }}</b></div>
+      <div><span class="muted">Verbleibend</span>
+        <b>{% if g.days_left > 0 %}{{ g.days_left }} Tage (≈ {{ (g.days_left / 7)|round|int }} Wochen){% elif g.days_left == 0 %}heute{% else %}vorbei{% endif %}</b>
+      </div>
+    </div>
+  {% endif %}
+
+  {% if g.description %}<p class="notes">{{ g.description }}</p>{% endif %}
+</div>
+
+{% if g.progress %}
+  <div class="card">
+    <h2>Fortschritt</h2>
+    <div class="muted">{% if g.exercises %}{{ g.exercises.name }} · {% endif %}{{ g.metric_definitions.label }}</div>
+    <div class="value-grid" style="margin-top:10px;">
+      <div><span class="muted">Bester Wert</span>
+        <b>{{ g.progress.best|num if g.progress.best is not none else 'noch keine Daten' }} {{ g.metric_definitions.unit or '' if g.progress.best is not none }}</b></div>
+      <div><span class="muted">Ziel</span><b>{{ g.progress.target|num }} {{ g.metric_definitions.unit or '' }}</b></div>
+    </div>
+    <progress class="progress" value="{{ g.progress.percent }}" max="100" style="margin-top:14px;"></progress>
+    <div class="muted" style="margin-top:6px;">
+      {% if g.progress.reached %}Ziel erreicht 🎉{% else %}{{ g.progress.percent }} % geschafft{% endif %}
+    </div>
+  </div>
+{% endif %}
+
+<a class="btn edit-btn" href="{{ url_for('edit_goal', goal_id=g.id) }}">Ziel bearbeiten</a>
+
+{% if g.status == 'active' %}
+  <form method="post" action="{{ url_for('goal_status', goal_id=g.id) }}">
+    <input type="hidden" name="status" value="achieved">
+    <button type="submit" class="secondary" style="width:100%;margin-top:0;">Als erreicht markieren</button>
+  </form>
+{% else %}
+  <form method="post" action="{{ url_for('goal_status', goal_id=g.id) }}">
+    <input type="hidden" name="status" value="active">
+    <button type="submit" class="secondary" style="width:100%;margin-top:0;">Wieder aktivieren</button>
+  </form>
+{% endif %}
+
+<form method="post" action="{{ url_for('delete_goal', goal_id=g.id) }}"
+      onsubmit="return confirm('Ziel wirklich löschen?');">
+  <button type="submit" class="danger">Ziel löschen</button>
+</form>
+
+{% endblock %}

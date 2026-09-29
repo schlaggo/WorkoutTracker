@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}Ziele{% endblock %}
+{% block content %}
+
+<div class="page-head">
+  <h1>Ziele</h1>
+  <a class="btn" href="{{ url_for('new_goal') }}">+ Neues Ziel</a>
+</div>
+
+{% if not active and not finished %}
+  <div class="card">
+    <p>Noch keine Ziele. Ziele sind optional: ein Event (z.B. Marathon), ein Skill (z.B. Handstand Push-Ups)
+      oder etwas Allgemeines (z.B. Grundausdauer verbessern).</p>
+  </div>
+{% endif %}
+
+{% for g in active %}
+  <a class="card workout-card" href="{{ url_for('goal_detail', goal_id=g.id) }}">
+    <div class="workout-card-top">
+      <strong>{{ g.title }}</strong>
+      <span class="tag goal-{{ g.goal_type }}">{{ GOAL_TYPES[g.goal_type] }}</span>
+    </div>
+
+    {% if g.days_left is not none %}
+      <div class="muted">
+        {% if g.days_left > 0 %}noch {{ g.days_left }} Tage{% elif g.days_left == 0 %}heute{% else %}Zieldatum vorbei{% endif %}
+        · {{ g.target_day|weekday_date }}
+      </div>
+    {% endif %}
+
+    {% if g.progress %}
+      <div class="muted" style="margin-top:6px;">
+        {% if g.exercises %}{{ g.exercises.name }} · {% endif %}{{ g.metric_definitions.label }}:
+        <b>{{ g.progress.best|num if g.progress.best is not none else '–' }}</b>
+        / {{ g.progress.target|num }} {{ g.metric_definitions.unit or '' }}
+      </div>
+      <progress class="progress" value="{{ g.progress.percent }}" max="100"></progress>
+    {% elif g.description %}
+      <div class="muted" style="margin-top:6px;">{{ g.description|truncate(100) }}</div>
+    {% endif %}
+  </a>
+{% endfor %}
+
+{% if finished %}
+  <h2 class="month-title">Abgeschlossen</h2>
+  {% for g in finished %}
+    <a class="card workout-card" href="{{ url_for('goal_detail', goal_id=g.id) }}">
+      <div class="workout-card-top">
+        <strong>{{ g.title }}</strong>
+        <span class="tag">{{ GOAL_STATUS[g.status] }}</span>
+      </div>
+    </a>
+  {% endfor %}
+{% endif %}
+
+{% endblock %}
