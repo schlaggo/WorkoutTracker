@@ -34,7 +34,7 @@
     </div>
     <progress class="progress" value="{{ g.progress.percent }}" max="100" style="margin-top:14px;"></progress>
     <div class="muted" style="margin-top:6px;">
-      {% if g.progress.reached %}Ziel erreicht 🎉{% else %}{{ g.progress.percent }} % geschafft{% endif %}
+      {% if g.progress.reached %}Ziel erreicht 🎉{% else %}{{ g.progress.percent }} % geschafft{% endif %}s
     </div>
   </div>
 {% endif %}
@@ -44,12 +44,12 @@
 {% if g.status == 'active' %}
   <form method="post" action="{{ url_for('goal_status', goal_id=g.id) }}">
     <input type="hidden" name="status" value="achieved">
-    <button type="submit" class="secondary" style="width:100%;margin-top:0;">Als erreicht markieren</button>
+    <button type="submit" class="secondary" style="width:100%;margin-top:10px;">Als erreicht markieren</button>
   </form>
 {% else %}
   <form method="post" action="{{ url_for('goal_status', goal_id=g.id) }}">
     <input type="hidden" name="status" value="active">
-    <button type="submit" class="secondary" style="width:100%;margin-top:0;">Wieder aktivieren</button>
+    <button type="submit" class="secondary" style="width:100%;margin-top:10px;">Wieder aktivieren</button>
   </form>
 {% endif %}
 

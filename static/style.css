@@ -116,7 +116,7 @@ button.danger:hover { background: rgba(255, 92, 99, .08); opacity: 1; }
 .link-btn { background: none; color: var(--danger); padding: 0; margin: 0; font-size: 13px; font-weight: 500; }
 .link-btn:hover { background: none; text-decoration: underline; opacity: 1; }
 .edit-btn {
-  display: block; margin: 4px 0 10px;
+  display: block; margin: 4px 0 0;
   background: var(--surface-2); color: var(--text); border: 1px solid var(--border);
 }
 
