@@ -79,13 +79,16 @@
 
     <div class="strength-fields">
       <div class="sets"></div>
-      <button type="button" class="secondary small" data-action="add-set">+ Satz</button>
+      <div class="set-buttons">
+        <button type="button" class="secondary small" data-action="add-set">+ Satz</button>
+        <button type="button" class="secondary small" data-action="remove-set">- Satz</button>
+      </div>
     </div>
 
     <div class="endurance-fields">
       <div class="set-row">
         <div><label>Distanz (km)</label><input type="text" inputmode="decimal" name="ex___N___distance_km"></div>
-        <div><label>Dauer (Sekunden)</label><input type="text" inputmode="numeric" name="ex___N___duration_s"></div>
+        <div><label>Dauer (h:mm:ss)</label><input type="text" name="ex___N___duration_s" placeholder="z.B. 52:30"></div>
       </div>
       <div class="set-row">
         <div><label>Höhenmeter (m)</label><input type="text" inputmode="numeric" name="ex___N___elevation_m"></div>
@@ -148,6 +151,22 @@ function addSet(block, values = {}) {
   row.querySelector('input[name$="_reps"]').value = values.reps ?? '';
 }
 
+// Sekunden aus der DB -> "52:30" bzw. "1:02:05" fürs Eingabefeld
+function formatDuration(seconds) {
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = Math.round(seconds % 60);
+  const pad = (n) => String(n).padStart(2, '0');
+  return h ? `${h}:${pad(m)}:${pad(s)}` : `${m}:${pad(s)}`;
+}
+
+// Letzten Satz einer Übung entfernen (mindestens 1 Zeile bleibt stehen)
+function removeSet(block) {
+  const setsEl = block.querySelector('.sets');
+  if (setsEl.children.length > 1) setsEl.lastElementChild.remove();
+  else setsEl.querySelectorAll('input').forEach(i => i.value = '');  // letzte Zeile nur leeren
+}
+
 // Übung hinzufügen. data = gespeicherte Übung oder null (neu, 3 leere Sätze)
 function addExercise(data = null) {
   const n = exerciseCounter++;
@@ -162,7 +181,7 @@ function addExercise(data = null) {
     if (data.sets.length === 0) addSet(block);
     for (const [key, value] of Object.entries(data.endurance || {})) {
       const input = block.querySelector(`input[name="ex_${n}_${key}"]`);
-      if (input) input.value = value;
+      if (input) input.value = (key === 'duration_s' && typeof value === 'number') ? formatDuration(value) : value;
     }
   } else {
     for (let i = 0; i < 3; i++) addSet(block);
@@ -357,6 +376,7 @@ exercisesEl.addEventListener('click', (ev) => {
   const action = ev.target.dataset.action;
   const block = ev.target.closest('.exercise-block');
   if (action === 'add-set') addSet(block);
+  if (action === 'remove-set') removeSet(block); markDirty('now')
   if (action === 'remove-exercise') { block.remove(); markDirty('now'); }
 });
 document.getElementById('add-exercise').addEventListener('click', () => addExercise());

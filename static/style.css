@@ -164,6 +164,7 @@ form .toggle-group label:has(input:checked) { background: var(--surface-3); colo
   border-radius: 14px; padding: 14px; margin-top: 14px;
 }
 .exercise-block input, .exercise-block select { background: var(--surface); }
+.set-buttons{ display: flex; gap: 8px; }
 .exercise-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
 
 /* Speicher-Status im Workout (bleibt beim Scrollen oben sichtbar) */

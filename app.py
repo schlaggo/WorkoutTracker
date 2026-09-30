@@ -73,6 +73,28 @@ def to_float(value):
 
 ENDURANCE_KEYS = ["distance_km", "duration_s", "elevation_m", "heart_rate_avg"]
 
+DURATION_ERROR = "Dauer bitte als Minuten:Sekunden oder Stunden:Minuten:Sekunden eingeben, z.B. 52:30 oder 1:02:05."
+
+
+def parse_duration(text):
+    """Zeit-Eingabe -> Sekunden (so wird es in der DB gespeichert).
+    '52:30' -> 3150, '1:02:05' -> 3725, '45' -> 2700 (nur eine Zahl = Minuten)
+    """
+    text = (text or "").strip()
+    if not text:
+        return None
+    parts = text.split(":")
+    if len(parts) > 3 or not all(p.strip().isdigit() for p in parts):
+        raise ValueError(DURATION_ERROR)
+    nums = [int(p) for p in parts]
+    if len(nums) == 1:
+        return nums[0] * 60
+    if any(n >= 60 for n in nums[1:]):  # Minuten/Sekunden nach dem ersten ":" max. 59
+        raise ValueError(DURATION_ERROR)
+    h, m, s = [0] * (3 - len(nums)) + nums
+    return h * 3600 + m * 60 + s
+
+
 def collect_exercise_blocks(form):
     """Liest alle Übungsblöcke aus dem Formular.
 
@@ -331,11 +353,15 @@ def parse_workout_form(form, is_strength):
                         metrics.append(("weight_kg", set_no, weight))
             else:
                 for key in ENDURANCE_KEYS:
-                    val = to_float(b["endurance"].get(key))
+                    raw = b["endurance"].get(key)
+                    val = parse_duration(raw) if key == "duration_s" else to_float(raw)
+            
                     if val is not None:
                         metrics.append((key, None, val))
             entries.append({**b, "metrics": metrics})
-    except ValueError:
+    except ValueError as ex:
+        if str(ex) == DURATION_ERROR:
+            return None, DURATION_ERROR
         return None, "Bitte bei Gewicht, Wiederholungen und Ausdauerwerten nur Zahlen eingeben."
     return entries, None
 
@@ -484,7 +510,7 @@ def resume_workout(workout_id):
     client.table("workouts").update({"status": "active"}).eq("id", workout_id).execute()
     flash("Workout wieder aufgenommen.", "success")
     return redirect(url_for("edit_workout", workout_id=workout_id))
-    
+
 # ------------------------------------------------------------
 # Workout-Bereich: Liste, Detailansicht, Löschen
 # ------------------------------------------------------------
