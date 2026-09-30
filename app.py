@@ -868,13 +868,15 @@ def week_grid(workouts, today, visible=CHART_WEEKS):
             day = monday + timedelta(days=d)
             types = set(types_by_day.get(day, []))
             if len(types) ==2:
-                kind = "hybrid "        # Kraft und Ausdauer
+                kind = "hybrid"        # Kraft und Ausdauer
             elif types:
                 kind = types.pop()      # Kraft oder Ausdauer
             else: 
                 kind = None
             days.append({
                 "kind": kind,
+                "is_today": day == today, 
+                "future": day > today,
             })
         weeks.append({"kw": monday.isocalendar()[1], "current": monday == this_monday, "days": days})
 

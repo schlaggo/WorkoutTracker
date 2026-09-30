@@ -96,7 +96,8 @@
           {% for day in wk.days %}
             {% set y = (6 - loop.index0) * ROW %}
             {% if day.kind %}
-            <rect x="{{ x }}" y="{{ y }} " width="{{ CW }}" height="{{ CH }}" rx="4" class="cell {{ day.kind }}"></rect>
+              <rect x="{{ x }}" y="{{ y }} " width="{{ CW }}" height="{{ CH }}" rx="4" class="cell {{ day.kind }}"></rect>
+            {% else %}
               <rect x="{{ x }}" y="{{ y }}" width="{{ CW }}" height="{{ CH }}" rx="4" class="cell empty{{ ' future' if day.future }}"/>
             {% endif %}
             {% if day.is_today %}
