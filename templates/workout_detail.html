@@ -54,6 +54,11 @@
     {% if not e.sets and not e.endurance %}<p class="muted">Keine Werte erfasst.</p>{% endif %}
   </div>
 {% endfor %}
+
+{% if w.status != 'active' %}
+<form method="post" action="{{url_for('resume_workout', workout_id=w.id)}}">
+  <button type="summit" class="secondary" style="display:block;width:100%;margin:4px 0 0;">Workout wiederaufnehmen</button>
+</form>
 <a class="btn edit-btn" href="{{ url_for('edit_workout', workout_id=w.id) }}">
   {{ 'Workout fortsetzen' if w.status == 'active' else 'Workout bearbeiten' }}
 </a>
