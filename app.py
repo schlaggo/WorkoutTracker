@@ -665,6 +665,8 @@ def percent_change(new, old):
 def totals(workouts):
     return {
         "count": len(workouts),
+        "strength": sum(1 for w in workouts if w["type_key"] == "strength"),
+        "endurance": sum(1 for w in workouts if w["type_key"] != "strength"),
         "volume": sum(w["summary"]["volume"] for w in workouts),
         "distance_km": sum(w["summary"]["distance_km"] for w in workouts),
         "duration_s": sum(w["summary"]["duration_s"] for w in workouts),
@@ -798,7 +800,9 @@ def dashboard():
         goals=goals,
         hints=build_hints(workouts, trends, goals, today),
         recent=sorted(workouts, key=lambda w: w["date"], reverse=True)[:3],
-        training_days_28=len({w["date"] for w in workouts if w["date"] > today - timedelta(days=28)}),
+        training_days_month=len({w["date"] for w in workouts
+                                if w["date"].year == today.year and w["date"].month == today.month}),
+        month_name=MONTHS[today.month - 1],
     )
 
 

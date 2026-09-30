@@ -5,12 +5,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <meta name="theme-color" content="#0b0e11">
   <title>{% block title %}Workout Tracker{% endblock %}</title>
-  <link rel="preconnect" href="https://eur03.safelinks.protection.outlook.com/?url=https%3A%2F%2Ffonts.googleapis.com%2F&data=05%7C02%7Clukas.singer%40ceratizit.com%7C1718bb1fbac0466ea82e08df1e2286ff%7C6e754c036c26480fa166ff9598a067ed%7C0%7C0%7C639262805782676484%7CUnknown%7CTWFpbGZsb3d8eyJFbXB0eU1hcGkiOnRydWUsIlYiOiIwLjAuMDAwMCIsIlAiOiJXaW4zMiIsIkFOIjoiTWFpbCIsIldUIjoyfQ%3D%3D%7C0%7C%7C%7C&sdata=MKWDy3ch%2Bc6R4wdqIvemO09BIdzTZl6oM3S8AB%2Fpp%2Fg%3D&reserved=0">
-  <link rel="preconnect" href="https://eur03.safelinks.protection.outlook.com/?url=https%3A%2F%2Ffonts.gstatic.com%2F&data=05%7C02%7Clukas.singer%40ceratizit.com%7C1718bb1fbac0466ea82e08df1e2286ff%7C6e754c036c26480fa166ff9598a067ed%7C0%7C0%7C639262805782708346%7CUnknown%7CTWFpbGZsb3d8eyJFbXB0eU1hcGkiOnRydWUsIlYiOiIwLjAuMDAwMCIsIlAiOiJXaW4zMiIsIkFOIjoiTWFpbCIsIldUIjoyfQ%3D%3D%7C0%7C%7C%7C&sdata=GVPIUPRxZrIi74s4luy0R44jNa9iJ4pXfp3SHBByjhM%3D&reserved=0" crossorigin>
-  <link href="https://eur03.safelinks.protection.outlook.com/?url=https%3A%2F%2Ffonts.googleapis.com%2Fcss2%3Ffamily%3DInter%3Awght%40400%3B500%3B600%3B700%3B800%26display%3Dswap&data=05%7C02%7Clukas.singer%40ceratizit.com%7C1718bb1fbac0466ea82e08df1e2286ff%7C6e754c036c26480fa166ff9598a067ed%7C0%7C0%7C639262805782733643%7CUnknown%7CTWFpbGZsb3d8eyJFbXB0eU1hcGkiOnRydWUsIlYiOiIwLjAuMDAwMCIsIlAiOiJXaW4zMiIsIkFOIjoiTWFpbCIsIldUIjoyfQ%3D%3D%7C0%7C%7C%7C&sdata=X98mkcKTKz24BtJDspkHejmRFR5tO%2F0Jv3H%2FlGoI4n0%3D&reserved=0" rel="stylesheet">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.getstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
-<body>
+<body spellcheck="false">
   <main>
     {% with messages = get_flashed_messages(with_categories=true) %}
       {% if messages %}
@@ -50,5 +50,12 @@
       </div>
     </nav>
   {% endif %}
+
+  <script>
+    // Iphone Android: Autokorrektur aus
+    document.addEventListener('focusin', (ev) =>{
+      if(ev.target.matches('input, textarea')) ev.target.setAttribute('autocorrect', 'off');
+    });
+  </script>
 </body>
 </html>

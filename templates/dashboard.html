@@ -19,13 +19,13 @@
 <div class="card">
   <div class="workout-card-top">
     <h2 style="margin:0;">Diese Woche</h2>
-    <span class="muted"><b>{{ training_days_28 }}</b> Trainingstage in 28 Tagen</span>
+    <span class="muted"><b>{{ training_days_month }}</b> Trainingstage im {{ month_name }}</span>
   </div>
   <div class="kpi-grid">
     <div class="kpi">
       <span class="muted">Workouts</span>
       <b>{{ cur.count }}</b>
-      <small>{{ delta(cur.count, prev.count) }}</small>
+      <small>Kraft {{ cur.strength }} Ausdauer {{ cur.endurance }}</small>
     </div>
     <div class="kpi">
       <span class="muted">Kraft-Volumen</span>
