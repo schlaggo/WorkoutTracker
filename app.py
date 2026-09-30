@@ -426,6 +426,24 @@ def form_state(w):
         ],
     }
 
+def last_values(workouts, current):
+    """Pro Übung die Werte aus dem letzten Workout VOR diesem -> Platzhalter im Formular.
+    Rückgabe: {exercise_id: {"date": "Di, 24.9.", "sets": [...], "endurance": {...}}}
+    """
+    when = lambda w: (w["date"], w["start_time"] or "")
+    result = {}
+    for w in sorted(workouts, key=when):  # alt -> neu: neuere Workouts überschreiben ältere
+        if w["id"] == current["id"] or when(w) > when(current):
+            continue  # das Workout selbst und spätere zählen nicht
+        for e in w["entries"]:
+            if e["sets"] or e["endurance"]:
+                result[e["exercise_id"]] = {
+                    "date": format_weekday_date(w["date"]),
+                    "sets": e["sets"],
+                    "endurance": e["endurance"],
+                }
+    return result
+
 
 @app.route("/workouts/new", methods=["GET", "POST"])
 @login_required
@@ -461,7 +479,13 @@ def edit_workout(workout_id):
         flash("Workout nicht gefunden.", "error")
         return redirect(url_for("workouts_list"))
     w = build_workout(rows.data[0])
-    return render_template("workout_form.html", exercises=load_exercises(client), workout=w, initial=form_state(w))
+    return render_template(
+        "workout_form.html",
+        exercises=load_exercises(client),
+        workout=w,
+        initial=form_state(w),
+        last=last_values(load_all_workouts(client), w),
+    )
 
 
 @app.route("/workouts/<workout_id>/autosave", methods=["POST"])

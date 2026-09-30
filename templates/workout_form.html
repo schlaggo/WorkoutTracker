@@ -76,6 +76,7 @@
       {% endfor %}
     </select>
     <input type="text" name="ex___N___new_name" placeholder="... oder neue Übung, z.B. Kreuzheben" style="margin-top:8px;">
+    <p class="last-hint" hidden></p>
 
     <div class="strength-fields">
       <div class="sets"></div>
@@ -115,6 +116,7 @@
 {# Daten für das JavaScript (als JSON-Block, damit der Linter nicht meckert) #}
 {% set page_data = {
   'initial': initial,
+  'last': last,
   'workout_id': workout.id,
   'is_active': is_active,
   'autosave_url': url_for('autosave_workout', workout_id=workout.id),
@@ -149,6 +151,72 @@ function addSet(block, values = {}) {
   const row = setsEl.lastElementChild;
   row.querySelector('input[name$="_weight"]').value = values.weight_kg ?? '';
   row.querySelector('input[name$="_reps"]').value = values.reps ?? '';
+  setRowPlaceholder(block, row, m - 1);
+}
+
+// ------------------------------------------------------------
+// Werte vom letzten Mal als graue Platzhalter (werden NICHT gespeichert)
+// ------------------------------------------------------------
+function fmtNum(v) {
+  return typeof v === 'number' ? String(v).replace('.', ',') : v;
+}
+
+// Letzte Werte der Übung, die in diesem Block ausgewählt ist (oder null)
+function lastFor(block) {
+  return PAGE.last[block.querySelector('.exercise-select').value] || null;
+}
+
+// Platzhalter für Satz Nr. i (0 = erster Satz)
+function setRowPlaceholder(block, row, i) {
+  const s = ((lastFor(block) || {}).sets || [])[i] || {};
+  row.querySelector('input[name$="_weight"]').placeholder = s.weight_kg != null ? fmtNum(s.weight_kg) : '';
+  row.querySelector('input[name$="_reps"]').placeholder = s.reps != null ? fmtNum(s.reps) : '';
+}
+
+// Platzhalter + Hinweis für einen Übungsblock setzen.
+// fillRows = true: noch leere Übung bekommt so viele Satz-Zeilen wie letztes Mal
+function applyLast(block, fillRows = false) {
+  const last = lastFor(block);
+  const setsEl = block.querySelector('.sets');
+
+  if (fillRows && last && last.sets.length) {
+    const untouched = [...setsEl.querySelectorAll('input')].every(i => !i.value);
+    if (untouched) {
+      setsEl.innerHTML = '';
+      last.sets.forEach(() => addSet(block));
+    }
+  }
+  [...setsEl.children].forEach((row, i) => setRowPlaceholder(block, row, i));
+
+  const end = (last && last.endurance) || {};
+  for (const k of ENDURANCE_KEYS) {
+    const input = block.querySelector(`input[name$="_${k}"]`);
+    const v = end[k];
+    if (v == null) input.placeholder = k === 'duration_s' ? 'z.B. 52:30' : '';
+    else input.placeholder = k === 'duration_s' ? formatDuration(v) : fmtNum(v);
+  }
+
+  // Kleiner Hinweis unter der Übungsauswahl
+  const hint = block.querySelector('.last-hint');
+  if (!last) { hint.hidden = true; return; }
+  let text;
+  if (last.sets.length) {
+    // \u00a0 = geschütztes Leerzeichen: "60 kg × 10" bricht nie mitten drin um
+    text = last.sets.map(s => s.weight_kg != null
+      ? `${fmtNum(s.weight_kg)}\u00a0kg\u00a0×\u00a0${fmtNum(s.reps ?? '–')}`
+      : `${fmtNum(s.reps)}\u00a0Wdh.`).join(' · ');
+  } else {
+    text = [
+      end.distance_km != null && `${fmtNum(end.distance_km)} km`,
+      end.duration_s != null && formatDuration(end.duration_s),
+      end.elevation_m != null && `${fmtNum(end.elevation_m)} hm`,
+      end.heart_rate_avg != null && `Ø ${fmtNum(end.heart_rate_avg)} bpm`,
+    ].filter(Boolean).join(' · ');
+  }
+  hint.innerHTML = '<b></b> <span class="values"></span><small>Graue Werte in den Feldern = letztes Mal</small>';
+  hint.querySelector('b').textContent = `Letztes Mal (${last.date}):`;
+  hint.querySelector('.values').textContent = text;
+  hint.hidden = false;
 }
 
 // Sekunden aus der DB -> "52:30" bzw. "1:02:05" fürs Eingabefeld
@@ -200,6 +268,7 @@ function applyType() {
   document.querySelectorAll('.exercise-select').forEach(sel => {
     if (sel.selectedOptions[0] && sel.selectedOptions[0].hidden) sel.value = '';
   });
+  document.querySelectorAll('#exercises .exercise-block').forEach(b => applyLast(b));
 }
 
 // Kompletten Stand ins Formular schreiben (vom Server ODER aus der lokalen Sicherung)
@@ -376,10 +445,14 @@ exercisesEl.addEventListener('click', (ev) => {
   const action = ev.target.dataset.action;
   const block = ev.target.closest('.exercise-block');
   if (action === 'add-set') addSet(block);
-  if (action === 'remove-set') removeSet(block); markDirty('now')
+  if (action === 'remove-set') {removeSet(block); markDirty('now'); }
   if (action === 'remove-exercise') { block.remove(); markDirty('now'); }
 });
 document.getElementById('add-exercise').addEventListener('click', () => addExercise());
+
+exerciseEl.addEventListener('change', (ev) =>{
+  if (ev.target.matches('.exercise-select')) applyLast(ev.target.closest('.exercise-block'), true);
+});
 
 // Verbindung wieder da -> sofort nachspeichern
 window.addEventListener('online', () => { if (dirty) saveNow(); });

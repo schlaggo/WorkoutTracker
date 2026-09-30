@@ -164,6 +164,16 @@ form .toggle-group label:has(input:checked) { background: var(--surface-3); colo
   border-radius: 14px; padding: 14px; margin-top: 14px;
 }
 .exercise-block input, .exercise-block select { background: var(--surface); }
+
+/* Hinweis "Letztes Mal" unter der Übungsauswahl */
+.last-hint {
+  margin: 10px 0 0; padding: 8px 10px; border-radius: var(--radius-sm);
+  background: var(--surface-3); font-size: 13px; color: var(--text);
+}
+.last-hint b { font-weight: 600; color: var(--muted); }
+.last-hint small { display: block; margin-top: 2px; font-size: 11px; color: var(--faint); }
+
+
 .set-buttons{ display: flex; gap: 8px; }
 .exercise-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
 
