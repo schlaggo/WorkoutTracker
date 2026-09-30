@@ -425,7 +425,7 @@ def save_workout_form(client, workout_id, form):
                     "is_custom": True,
                     "created_by": session["user_id"],
                 }).execute().data[0]
-                 known.append(row)
+                known.append(row)
             exercise_id = row["id"]
             created[str(e["n"])] = {"id": exercise_id, "name": row["name"], "type": workout_type}
         payload_entries.append({
