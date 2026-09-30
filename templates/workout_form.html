@@ -213,7 +213,7 @@ function applyLast(block, fillRows = false) {
       end.heart_rate_avg != null && `Ø ${fmtNum(end.heart_rate_avg)} bpm`,
     ].filter(Boolean).join(' · ');
   }
-  hint.innerHTML = '<b></b> <span class="values"></span><small>Graue Werte in den Feldern = letztes Mal</small>';
+  hint.innerHTML = '<b></b> <span class="values"></span><small>Übertreffe die vorausgefüllten Werte für maximalen Progress!</small>';
   hint.querySelector('b').textContent = `Letztes Mal (${last.date}):`;
   hint.querySelector('.values').textContent = text;
   hint.hidden = false;
@@ -450,7 +450,7 @@ exercisesEl.addEventListener('click', (ev) => {
 });
 document.getElementById('add-exercise').addEventListener('click', () => addExercise());
 
-exerciseEl.addEventListener('change', (ev) =>{
+exercisesEl.addEventListener('change', (ev) =>{
   if (ev.target.matches('.exercise-select')) applyLast(ev.target.closest('.exercise-block'), true);
 });
 
