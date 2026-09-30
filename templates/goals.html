@@ -23,7 +23,7 @@
 
     {% if g.days_left is not none %}
       <div class="muted">
-        {% if g.days_left > 0 %}noch {{ g.days_left }} Tage{% elif g.days_left == 0 %}heute{% else %}Zieldatum vorbei{% endif %}
+        {{ g.days_left|countdown }}
         · {{ g.target_day|weekday_date }}
       </div>
     {% endif %}

@@ -14,9 +14,8 @@
   {% if g.target_date %}
     <div class="value-grid" style="margin-top:14px;">
       <div><span class="muted">{{ 'Eventdatum' if g.goal_type == 'event' else 'Zieldatum' }}</span><b>{{ g.target_day|long_date }}</b></div>
-      <div><span class="muted">Verbleibend</span>
-        <b>{% if g.days_left > 0 %}{{ g.days_left }} Tage (≈ {{ (g.days_left / 7)|round|int }} Wochen){% elif g.days_left == 0 %}heute{% else %}vorbei{% endif %}</b>
-      </div>
+      {% if g.days_left is not none %}
+      <div><span class="muted">Countdown</span><b>{{ g.days_left|countdown }}</b></div>
     </div>
   {% endif %}
 
@@ -34,7 +33,7 @@
     </div>
     <progress class="progress" value="{{ g.progress.percent }}" max="100" style="margin-top:14px;"></progress>
     <div class="muted" style="margin-top:6px;">
-      {% if g.progress.reached %}Ziel erreicht 🎉{% else %}{{ g.progress.percent }} % geschafft{% endif %}s
+      {% if g.progress.reached %}Ziel erreicht 🎉{% else %}{{ g.progress.percent }} % geschafft{% endif %}
     </div>
   </div>
 {% endif %}

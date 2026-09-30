@@ -1,7 +1,9 @@
 import os
 import re
 import time
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo
+
 
 import jwt
 from flask import Flask, render_template, request, redirect, session, url_for, flash
@@ -14,6 +16,15 @@ load_dotenv()
 
 app = Flask(__name__)
 app.secret_key = os.environ["FLASK_SECRET_KEY"]
+
+# Render läuft in UTC -> "heute" immer nach österreichischer Zeit bestimmen,
+# sonst ist zwischen 0 und 2 Uhr noch "gestern"
+TIMEZONE = ZoneInfo("Europe/Vienna")
+
+
+def local_today():
+    return datetime.now(TIMEZONE).date()
+
 
 # Cookie-Sessions absichern (auf Render läuft alles über HTTPS)
 app.config["SESSION_COOKIE_HTTPONLY"] = True
@@ -214,6 +225,14 @@ def format_pace(seconds_per_km):
     m, s = divmod(int(round(seconds_per_km)), 60)
     return f"{m}:{s:02d}"
 
+@app.template_filter("countdown")
+def format_countdown(days):
+    """Tage bis zum Event -> 'Noch 12 Tage', 'Morgen', 'Heute', 'Vorbei'"""
+    if days is None:
+        return ""
+    if days > 1:
+        return f"Noch {days} Tage"
+    return {1: "Morgen", 0: "Heute"}.get(days, "Vorbei")
 
 @app.template_filter("weekday_date")
 def format_weekday_date(d):
@@ -320,6 +339,16 @@ def logout():
 def load_exercises(client):
     return client.table("exercises").select("id, name, workout_type_id").order("name").execute().data
 
+def normalize_name(name):
+    """' Weighted  pull ups ' -> 'weighted pull ups' (zum Vergleichen von Übungsnamen)"""
+    return " ".join((name or "").split()).lower()
+
+
+def find_exercise(exercises, name, workout_type):
+    """Gibt es diese Übung (gleicher Name, egal ob groß/klein, gleicher Typ) schon? -> Zeile oder None"""
+    wanted = normalize_name(name)
+    return next((x for x in exercises
+                 if normalize_name(x["name"]) == wanted and x["workout_type_id"] == workout_type), None)
 
 def active_workout_id(client):
     """ID des laufenden Workouts oder None."""
@@ -382,26 +411,28 @@ def save_workout_form(client, workout_id, form):
 
     created = {}
     payload_entries = []
+    known = None  # vorhandene Übungen, nur laden wenn wirklich ein neuer Name eingetippt wurde
     for e in entries:
         exercise_id = e["exercise_id"]
-        if not exercise_id:  # neue Übung zuerst anlegen
-            row = client.table("exercises").insert({
-                "workout_type_id": workout_type,
-                "name": e["new_name"],
-                "is_custom": True,
-                "created_by": session["user_id"],
-            }).execute().data[0]
+        if not exercise_id:  # neuer Name eingetippt
+            if known is None:
+                known = load_exercises(client)
+            row = find_exercise(known, e["new_name"], workout_type)
+            if row is None:  # gibt es wirklich noch nicht -> anlegen
+                row = client.table("exercises").insert({
+                    "workout_type_id": workout_type,
+                    "name": " ".join(e["new_name"].split()),  # doppelte Leerzeichen raus
+                    "is_custom": True,
+                    "created_by": session["user_id"],
+                }).execute().data[0]
+                known.append(row)
             exercise_id = row["id"]
-            created[str(e["n"])] = {"id": exercise_id, "name": row["name"], "type": workout_type}
-        payload_entries.append({
-            "exercise_id": exercise_id,
-            "metrics": [{"key": k, "set_number": n, "value": v} for k, n, v in e["metrics"]],
-        })
+
 
     payload = {
         "id": workout_id,
         "workout_type_id": workout_type,
-        "date": form.get("date") or str(date.today()),
+        "date": form.get("date") or str(local_today()),
         "start_time": form.get("start_time") or None,
         "notes": form.get("notes", "").strip() or None,
         "entries": payload_entries,
@@ -460,7 +491,7 @@ def new_workout():
         created = client.table("workouts").insert({
             "user_id": session["user_id"],
             "workout_type_id": int(request.form.get("workout_type", 1)),
-            "date": request.form.get("date") or str(date.today()),
+            "date": request.form.get("date") or str(local_today()),
             "start_time": request.form.get("start_time") or None,
             "status": "active",
         }).execute()
@@ -646,7 +677,9 @@ def enrich_goal(goal, workouts):
     """Ergänzt ein Ziel um Fortschritt und verbleibende Tage."""
     goal["progress"] = goal_progress(goal, workouts)
     goal["target_day"] = date.fromisoformat(goal["target_date"]) if goal.get("target_date") else None
-    goal["days_left"] = (goal["target_day"] - date.today()).days if goal["target_day"] else None
+    # Countdown nur bei Events
+    is_event = goal.get("goal_type") == "event"
+    goal["days_left"] = (goal["target_day"] - local_today()).days if goal["target_day"] and is_event else None
     return goal
 
 
@@ -904,7 +937,7 @@ def build_hints(workouts, trends, goals, today):
 @login_required
 def dashboard():
     client = current_client()
-    today = date.today()
+    today = local_today()
     workouts = load_all_workouts(client)
 
     this_monday = week_start(today)
