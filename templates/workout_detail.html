@@ -54,7 +54,9 @@
     {% if not e.sets and not e.endurance %}<p class="muted">Keine Werte erfasst.</p>{% endif %}
   </div>
 {% endfor %}
-<a class="btn edit-btn" href="{{ url_for('edit_workout', workout_id=w.id) }}">Workout bearbeiten</a>
+<a class="btn edit-btn" href="{{ url_for('edit_workout', workout_id=w.id) }}">
+  {{ 'Workout fortsetzen' if w.status == 'active' else 'Workout bearbeiten' }}
+</a>
 
 <form method="post" action="{{ url_for('delete_workout', workout_id=w.id) }}"
       onsubmit="return confirm('Workout wirklich löschen? Das kann nicht rückgängig gemacht werden.');">

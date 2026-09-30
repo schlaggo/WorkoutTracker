@@ -166,6 +166,19 @@ form .toggle-group label:has(input:checked) { background: var(--surface-3); colo
 .exercise-block input, .exercise-block select { background: var(--surface); }
 .exercise-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
 
+/* Speicher-Status im Workout (bleibt beim Scrollen oben sichtbar) */
+.save-status {
+  position: sticky; top: 0; z-index: 5;
+  margin: 0 0 12px; padding: 8px 12px; border-radius: var(--radius-sm);
+  font-size: 13px; background: var(--surface); border: 1px solid var(--border); color: var(--muted);
+}
+.save-status.saved { color: var(--endurance); }
+.save-status.offline, .save-status.pending { color: var(--warn); }
+.save-status.login, .save-status.error { color: var(--danger); border-color: rgba(255, 92, 99, .4); }
+.save-status a { color: var(--text); font-weight: 600; }
+button:disabled { opacity: .5; cursor: wait; }
+
+
 /* ---------- Meldungen ---------- */
 .flash {
   padding: 11px 14px; border-radius: var(--radius-sm); margin-bottom: 12px; font-size: 14px;
@@ -182,6 +195,8 @@ form .toggle-group label:has(input:checked) { background: var(--surface-3); colo
 }
 .tag.strength { background: rgba(74, 168, 255, .14); color: var(--strength); }
 .tag.endurance { background: rgba(47, 214, 127, .14); color: var(--endurance); }
+.tag.live { background: rgba(255, 92, 99, .14); color: var(--danger); }
+.live-card { border-color: rgba(255, 92, 99, .4); }
 .tag.goal-event { background: rgba(242, 193, 78, .14); color: var(--warn); }
 .tag.goal-skill { background: rgba(180, 140, 255, .14); color: #b48cff; }
 .tag.goal-general { background: var(--surface-3); color: var(--muted); }

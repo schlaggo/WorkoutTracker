@@ -19,6 +19,8 @@ app.secret_key = os.environ["FLASK_SECRET_KEY"]
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 app.config["SESSION_COOKIE_SECURE"] = bool(os.environ.get("RENDER"))
+# Login bleibt 30 Tage erhalten (auch wenn Browser/App am Handy geschlossen wird)
+app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(days=30)
 
 
 def current_client():
@@ -26,6 +28,7 @@ def current_client():
     refresh = session.get("refresh_token")
     if not token or not refresh:
         return None
+    session.permanent = True  # auch bestehende Logins auf 30 Tage umstellen
 
     try:
         exp = jwt.decode(token, options={"verify_signature": False})["exp"]
@@ -53,8 +56,12 @@ def login_required(view):
     def wrapped(*args, **kwargs):
         if "user_id" not in session or current_client() is None:
             session.clear()
+            # Hintergrund-Speichern (autosave) bekommt JSON statt einer Login-Seite
+            if request.headers.get("X-Requested-With") == "fetch":
+                return {"ok": False, "error": "login"}, 401
             flash("Sitzung abgelaufen, bitte neu einloggen.", "error")
-            return redirect(url_for("login"))
+            # nach dem Login zurück auf die Seite, auf der man war
+            return redirect(url_for("login", next=request.path if request.method == "GET" else None))
         return view(*args, **kwargs)
 
     return wrapped
@@ -78,6 +85,7 @@ def collect_exercise_blocks(form):
     for n in indices:
         set_nums = sorted({int(m.group(1)) for k in keys if (m := re.match(rf"ex_{n}_set_(\d+)_reps$", k))})
         blocks.append({
+            "n": n,
             "exercise_id": form.get(f"ex_{n}_id") or None,
             "new_name": form.get(f"ex_{n}_new_name", "").strip(),
             "sets": [(form.get(f"ex_{n}_set_{m}_weight"), form.get(f"ex_{n}_set_{m}_reps")) for m in set_nums],
@@ -91,7 +99,7 @@ def collect_exercise_blocks(form):
 # Supabase kann verknüpfte Tabellen direkt mitladen ("embedding"):
 # workouts -> workout_entries -> exercises + entry_metrics -> metric_definitions
 WORKOUT_SELECT = (
-    "id, date, start_time, notes, created_at, workout_type_id, workout_types(key, label), "
+    "id, date, start_time, notes, status, created_at, workout_type_id, workout_types(key, label), "
     "workout_entries(id, order_index, exercise_id, exercises(name),"
     "entry_metrics(set_number, value, metric_definitions(key)))"
 )
@@ -142,6 +150,7 @@ def build_workout(raw):
         "date": date.fromisoformat(raw["date"]),
         "start_time": (raw.get("start_time") or "")[:5] or None,
         "notes": raw.get("notes"),
+        "status": raw.get("status") or "finished",   # 'active' = läuft gerade
         "type_key": wtype.get("key"),
         "type_label": wtype.get("label", ""),
         "entries": entries,
@@ -228,8 +237,8 @@ def signup():
         client = get_client()
         try:
             res = client.auth.sign_up({
-                "email": email, 
-                "password": password, 
+                "email": email,
+                "password": password,
                 "options": {"data":{"display_name": display_name}},
             })
         except Exception as e:
@@ -260,12 +269,16 @@ def login():
             flash(f"Login fehlgeschlagen: {e}", "error")
             return render_template("login.html")
 
+        session.permanent = True
         session["access_token"] = res.session.access_token
         session["refresh_token"] = res.session.refresh_token
         session["user_id"] = res.user.id
         session["email"] = res.user.email
 
         ensure_profile(get_authenticated_client(res.session.access_token), res.user)
+        next_url = request.args.get("next", "")
+        if next_url.startswith("/") and not next_url.startswith("//"):  # nur Seiten dieser App
+            return redirect(next_url)
         return redirect(url_for("dashboard"))
 
     return render_template("login.html")
@@ -278,15 +291,27 @@ def logout():
     return redirect(url_for("login"))
 
 # ------------------------------------------------------------
-# Workout anlegen / bearbeiten (gemeinsame Logik, gleiches Formular)
+# Workout starten / live erfassen / beenden / bearbeiten
+# Ablauf: Start Workout -> Workout wird SOFORT in der DB angelegt (status 'active')
+# -> jede Eingabe wird automatisch gespeichert (autosave) -> End Workout (status 'finished')
 # ------------------------------------------------------------
 def load_exercises(client):
     return client.table("exercises").select("id, name, workout_type_id").order("name").execute().data
 
 
+def active_workout_id(client):
+    """ID des laufenden Workouts oder None."""
+    rows = (
+        client.table("workouts").select("id").eq("status", "active")
+        .order("created_at", desc=True).limit(1).execute()
+    )
+    return rows.data[0]["id"] if rows.data else None
+
+
 def parse_workout_form(form, is_strength):
     """Prüft das Formular und rechnet alle Werte um – noch OHNE zu speichern.
     Rückgabe: (entries, fehlermeldung). Bei Fehler ist entries None.
+    Leere Workouts sind erlaubt (direkt nach dem Start ist noch nichts eingetragen).
     """
     entries = []
     try:
@@ -312,36 +337,36 @@ def parse_workout_form(form, is_strength):
             entries.append({**b, "metrics": metrics})
     except ValueError:
         return None, "Bitte bei Gewicht, Wiederholungen und Ausdauerwerten nur Zahlen eingeben."
-
-    if not entries:
-        return None, "Bitte mindestens eine Übung auswählen oder neu anlegen."
     return entries, None
 
 
-def save_workout_form(client, workout_id=None):
-    """Speichert das Formular. workout_id=None -> neues Workout, sonst bearbeiten.
+def save_workout_form(client, workout_id, form):
+    """Speichert den aktuellen Stand des Formulars in ein bestehendes Workout.
 
     Das eigentliche Speichern übernimmt die DB-Funktion save_workout():
     Workout + alle Übungen + alle Werte in EINER Transaktion (alles oder nichts).
-    Rückgabe: ID des gespeicherten Workouts, oder None bei Fehler (Meldung per flash).
+    Rückgabe: (neu_angelegte_übungen, fehlermeldung)
+    neu_angelegte_übungen = {"<übungsnummer>": {"id": ..., "name": ...}} -> damit das
+    Formular die neue Übung übernimmt und sie beim nächsten Speichern nicht nochmal anlegt.
     """
-    workout_type = int(request.form["workout_type"])
-    entries, error = parse_workout_form(request.form, is_strength=(workout_type == 1))
+    workout_type = int(form["workout_type"])
+    entries, error = parse_workout_form(form, is_strength=(workout_type == 1))
     if error:
-        flash(error, "error")
-        return None
+        return None, error
 
+    created = {}
     payload_entries = []
     for e in entries:
         exercise_id = e["exercise_id"]
         if not exercise_id:  # neue Übung zuerst anlegen
-            created = client.table("exercises").insert({
+            row = client.table("exercises").insert({
                 "workout_type_id": workout_type,
                 "name": e["new_name"],
                 "is_custom": True,
                 "created_by": session["user_id"],
-            }).execute()
-            exercise_id = created.data[0]["id"]
+            }).execute().data[0]
+            exercise_id = row["id"]
+            created[str(e["n"])] = {"id": exercise_id, "name": row["name"], "type": workout_type}
         payload_entries.append({
             "exercise_id": exercise_id,
             "metrics": [{"key": k, "set_number": n, "value": v} for k, n, v in e["metrics"]],
@@ -350,17 +375,16 @@ def save_workout_form(client, workout_id=None):
     payload = {
         "id": workout_id,
         "workout_type_id": workout_type,
-        "date": request.form.get("date") or str(date.today()),
-        "start_time": request.form.get("start_time") or None,
-        "notes": request.form.get("notes", "").strip() or None,
+        "date": form.get("date") or str(date.today()),
+        "start_time": form.get("start_time") or None,
+        "notes": form.get("notes", "").strip() or None,
         "entries": payload_entries,
     }
     try:
-        result = client.rpc("save_workout", {"p": payload}).execute()
+        client.rpc("save_workout", {"p": payload}).execute()
     except Exception as ex:
-        flash(f"Speichern fehlgeschlagen: {ex}", "error")
-        return None
-    return result.data
+        return None, f"Speichern fehlgeschlagen: {ex}"
+    return created, None
 
 
 def form_state(w):
@@ -371,7 +395,7 @@ def form_state(w):
         "start_time": w["start_time"] or "",
         "notes": w["notes"] or "",
         "entries": [
-            {"exercise_id": e["exercise_id"], "sets": e["sets"], "endurance": e["endurance"]}
+            {"exercise_id": e["exercise_id"], "new_name": "", "sets": e["sets"], "endurance": e["endurance"]}
             for e in w["entries"]
         ],
     }
@@ -380,33 +404,87 @@ def form_state(w):
 @app.route("/workouts/new", methods=["GET", "POST"])
 @login_required
 def new_workout():
+    """GET: Startseite (Typ, Datum, Uhrzeit). POST: Workout sofort in der DB anlegen."""
     client = current_client()
+
+    # Läuft schon ein Workout? Dann dorthin, statt ein zweites zu starten
+    running = active_workout_id(client)
+    if running:
+        return redirect(url_for("edit_workout", workout_id=running))
+
     if request.method == "POST":
-        workout_id = save_workout_form(client)
-        if workout_id:
-            flash("Workout gespeichert.", "success")
-            return redirect(url_for("workout_detail", workout_id=workout_id))
-    return render_template("workout_form.html", exercises=load_exercises(client), workout=None, initial=None)
+        created = client.table("workouts").insert({
+            "user_id": session["user_id"],
+            "workout_type_id": int(request.form.get("workout_type", 1)),
+            "date": request.form.get("date") or str(date.today()),
+            "start_time": request.form.get("start_time") or None,
+            "status": "active",
+        }).execute()
+        return redirect(url_for("edit_workout", workout_id=created.data[0]["id"]))
+
+    return render_template("workout_start.html")
 
 
-@app.route("/workouts/<workout_id>/edit", methods=["GET", "POST"])
+@app.route("/workouts/<workout_id>/edit")
 @login_required
 def edit_workout(workout_id):
+    """Laufendes Workout erfassen ODER fertiges Workout bearbeiten – gleiches Formular."""
+    client = current_client()
+    rows = client.table("workouts").select(WORKOUT_SELECT).eq("id", workout_id).execute()
+    if not rows.data:
+        flash("Workout nicht gefunden.", "error")
+        return redirect(url_for("workouts_list"))
+    w = build_workout(rows.data[0])
+    return render_template("workout_form.html", exercises=load_exercises(client), workout=w, initial=form_state(w))
+
+
+@app.route("/workouts/<workout_id>/autosave", methods=["POST"])
+@login_required
+def autosave_workout(workout_id):
+    """Wird vom Formular im Hintergrund aufgerufen. Antwortet mit JSON statt einer Seite."""
+    client = current_client()
+    # Gibt es das Workout und gehört es mir? (RLS liefert fremde Workouts nicht aus)
+    if not client.table("workouts").select("id").eq("id", workout_id).execute().data:
+        return {"ok": False, "error": "Workout nicht gefunden."}, 404
+
+    created, error = save_workout_form(client, workout_id, request.form)
+    if error:
+        return {"ok": False, "error": error}, 400
+    return {"ok": True, "created": created}
+
+
+@app.route("/workouts/<workout_id>/end", methods=["POST"])
+@login_required
+def end_workout(workout_id):
     client = current_client()
     rows = client.table("workouts").select(WORKOUT_SELECT).eq("id", workout_id).execute()
     if not rows.data:
         flash("Workout nicht gefunden.", "error")
         return redirect(url_for("workouts_list"))
 
-    if request.method == "POST":
-        if save_workout_form(client, workout_id):
-            flash("Änderungen gespeichert.", "success")
-            return redirect(url_for("workout_detail", workout_id=workout_id))
+    if not build_workout(rows.data[0])["entries"]:
+        client.table("workouts").delete().eq("id", workout_id).execute()
+        flash("Workout ohne Übungen wurde verworfen.", "success")
+        return redirect(url_for("dashboard"))
 
-    w = build_workout(rows.data[0])
-    return render_template("workout_form.html", exercises=load_exercises(client), workout=w, initial=form_state(w))
+    client.table("workouts").update({"status": "finished"}).eq("id", workout_id).execute()
+    flash("Workout beendet. Stark!", "success")
+    return redirect(url_for("workout_detail", workout_id=workout_id))
 
+@app.route("/workouts/<workout_id>/resume", methods=["POST"])
+@login_required
+def resume_workout(workout_id):
+    """Beendetes Workout wieder auf 'active' setzen (z.B. zu früh beendet)."""
+    client = current_client()
+    running = active_workout_id(client)
+    if running and running != workout_id:
+        flash("Es läuft bereits ein anderes Workout. Beende das zuerst.", "error")
+        return redirect(url_for("edit_workout", workout_id=running))
 
+    client.table("workouts").update({"status": "active"}).eq("id", workout_id).execute()
+    flash("Workout wieder aufgenommen.", "success")
+    return redirect(url_for("edit_workout", workout_id=workout_id))
+    
 # ------------------------------------------------------------
 # Workout-Bereich: Liste, Detailansicht, Löschen
 # ------------------------------------------------------------
@@ -800,6 +878,7 @@ def dashboard():
         goals=goals,
         hints=build_hints(workouts, trends, goals, today),
         recent=sorted(workouts, key=lambda w: w["date"], reverse=True)[:3],
+        active=next((w for w in workouts if w["status"] == "active"), None),
         training_days_month=len({w["date"] for w in workouts
                                 if w["date"].year == today.year and w["date"].month == today.month}),
         month_name=MONTHS[today.month - 1],
@@ -808,4 +887,4 @@ def dashboard():
 
 
 if __name__ == "__main__":
-    app.run(debug=True) 
+    app.run(debug=True)

@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}Workout starten{% endblock %}
+{% block content %}
+
+<a class="back-link" href="{{ url_for('dashboard') }}">← Übersicht</a>
+
+<div class="card">
+  <h1>Workout starten</h1>
+  <p class="muted" style="margin-top:0;">
+    Das Workout wird sofort angelegt. Alles, was du einträgst, wird automatisch gespeichert.
+  </p>
+
+  <form method="post">
+    <label>Trainingstyp</label>
+    <div class="toggle-group">
+      <label><input type="radio" name="workout_type" value="1" checked> Krafttraining</label>
+      <label><input type="radio" name="workout_type" value="2"> Ausdauer</label>
+    </div>
+
+    <div class="set-row">
+      <div>
+        <label for="date">Datum</label>
+        <input type="date" name="date" id="date">
+      </div>
+      <div>
+        <label for="start_time">Uhrzeit</label>
+        <input type="time" name="start_time" id="start_time">
+      </div>
+    </div>
+
+    <button type="submit" style="display:block;width:100%;">Start Workout</button>
+  </form>
+</div>
+
+<script>
+// Datum und Uhrzeit mit "jetzt" vorausfüllen (lokale Zeit von Handy/PC, nicht die des Servers)
+const now = new Date();
+const pad = (n) => String(n).padStart(2, '0');
+document.getElementById('date').value = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+document.getElementById('start_time').value = `${pad(now.getHours())}:${pad(now.getMinutes())}`;
+</script>
+
+{% endblock %}

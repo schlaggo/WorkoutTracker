@@ -1,17 +1,25 @@
-
 {% extends "base.html" %}
-{% block title %}{{ 'Workout bearbeiten' if workout else 'Neues Workout' }}{% endblock %}
+{% set is_active = workout.status == 'active' %}
+{% block title %}{{ 'Workout läuft' if is_active else 'Workout bearbeiten' }}{% endblock %}
 {% block content %}
 
-{% if workout %}
-  <a class="back-link" href="{{ url_for('workout_detail', workout_id=workout.id) }}">← Zurück zum Workout</a>
+{% if is_active %}
+  <a class="back-link" href="{{ url_for('dashboard') }}">← Übersicht (Workout läuft weiter)</a>
 {% else %}
-  <a class="back-link" href="{{ url_for('workouts_list') }}">← Alle Workouts</a>
+  <a class="back-link" href="{{ url_for('workout_detail', workout_id=workout.id) }}">← Zurück zum Workout</a>
 {% endif %}
 
+{# Speicher-Status: zeigt jederzeit, ob alles in der Datenbank ist #}
+<div id="save-status" class="save-status">✓ Gespeichert</div>
+
 <div class="card">
-  <h1>{{ 'Workout bearbeiten' if workout else 'Neues Workout erfassen' }}</h1>
-  <form method="post" id="workout-form">
+  <div class="workout-card-top">
+    <h1 style="margin:0;">{{ 'Workout läuft' if is_active else 'Workout bearbeiten' }}</h1>
+    {% if is_active %}<span class="tag live">● Live</span>{% endif %}
+  </div>
+
+  {# Kein Absende-Button: jede Eingabe wird automatisch im Hintergrund gespeichert #}
+  <form id="workout-form" onsubmit="return false;">
 
     <label>Trainingstyp</label>
     <div class="toggle-group">
@@ -37,11 +45,21 @@
     <div id="exercises"></div>
 
     <button type="button" class="secondary" id="add-exercise">+ Übung hinzufügen</button>
-    <button type="submit" style="display:block;width:100%;">
-      {{ 'Änderungen speichern' if workout else 'Workout speichern' }}
-    </button>
   </form>
 </div>
+
+{% if is_active %}
+  <button type="button" id="finish-btn" style="display:block;width:100%;">End Workout</button>
+  <form method="post" id="end-form" action="{{ url_for('end_workout', workout_id=workout.id) }}"></form>
+  <form method="post" id="discard-form" action="{{ url_for('delete_workout', workout_id=workout.id) }}">
+    <button type="submit" class="danger">Workout verwerfen</button>
+  </form>
+{% else %}
+  <button type="button" id="resume-btn" class="secondary" style="display:block;width:100%;">Workout wiederaufnehmen</button>
+  <form method="post" id="resume-form" action="{{ url_for('resume_workout', workout_id=workout.id) }}"></form>
+  <button type="button" id="finish-btn" style="display:block;width:100%;">Fertig</button>
+{% endif %}
+
 
 {# ---------- Vorlage für EINE Übung. __N__ wird per JavaScript durch die Übungsnummer ersetzt ---------- #}
 <template id="exercise-template">
@@ -91,14 +109,28 @@
   </div>
 </template>
 
-<script type="application/json" id="initial-data">{{ initial|tojson }}</script>
+{# Daten für das JavaScript (als JSON-Block, damit der Linter nicht meckert) #}
+{% set page_data = {
+  'initial': initial,
+  'workout_id': workout.id,
+  'is_active': is_active,
+  'autosave_url': url_for('autosave_workout', workout_id=workout.id),
+  'detail_url': url_for('workout_detail', workout_id=workout.id),
+  'login_url': url_for('login', next=request.path),
+} %}
+<script type="application/json" id="page-data">{{ page_data|tojson }}</script>
 <script>
-// Beim Bearbeiten: gespeicherte Daten des Workouts, bei neuem Workout: null
-const INITIAL = JSON.parse(document.getElementById('initial-data').textContent)
+const PAGE = JSON.parse(document.getElementById('page-data').textContent);
+const ENDURANCE_KEYS = ['distance_km', 'duration_s', 'elevation_m', 'heart_rate_avg'];
 
-let exerciseCounter = 0;
+const form = document.getElementById('workout-form');
 const exercisesEl = document.getElementById('exercises');
+const statusEl = document.getElementById('save-status');
+let exerciseCounter = 0;
 
+// ============================================================
+// 1) Formular aufbauen
+// ============================================================
 function currentType() {
   return document.querySelector('input[name="workout_type"]:checked').value;
 }
@@ -116,7 +148,7 @@ function addSet(block, values = {}) {
   row.querySelector('input[name$="_reps"]').value = values.reps ?? '';
 }
 
-// Übung hinzufügen. data = gespeicherte Übung (beim Bearbeiten) oder null (neu, 3 leere Sätze)
+// Übung hinzufügen. data = gespeicherte Übung oder null (neu, 3 leere Sätze)
 function addExercise(data = null) {
   const n = exerciseCounter++;
   const html = document.getElementById('exercise-template').innerHTML.replaceAll('__N__', n);
@@ -124,10 +156,11 @@ function addExercise(data = null) {
   const block = exercisesEl.lastElementChild;
 
   if (data) {
-    block.querySelector('.exercise-select').value = data.exercise_id;
+    block.querySelector('.exercise-select').value = data.exercise_id || '';
+    block.querySelector('input[name$="_new_name"]').value = data.new_name || '';
     data.sets.forEach(s => addSet(block, s));
     if (data.sets.length === 0) addSet(block);
-    for (const [key, value] of Object.entries(data.endurance)) {
+    for (const [key, value] of Object.entries(data.endurance || {})) {
       const input = block.querySelector(`input[name="ex_${n}_${key}"]`);
       if (input) input.value = value;
     }
@@ -150,32 +183,246 @@ function applyType() {
   });
 }
 
-// Klicks auf "+ Satz" und "Entfernen" (ein Listener für alle Übungen)
+// Kompletten Stand ins Formular schreiben (vom Server ODER aus der lokalen Sicherung)
+function render(state) {
+  document.querySelector(`input[name="workout_type"][value="${state.type_id}"]`).checked = true;
+  document.getElementById('date').value = state.date;
+  document.getElementById('start_time').value = state.start_time;
+  document.getElementById('notes').value = state.notes;
+  exercisesEl.innerHTML = '';
+  state.entries.forEach(e => addExercise(e));
+  if (state.entries.length === 0) addExercise();
+  applyType();
+}
+
+// Aktuellen Stand aus dem Formular auslesen (für die lokale Sicherung)
+function readState() {
+  return {
+    type_id: currentType(),
+    date: document.getElementById('date').value,
+    start_time: document.getElementById('start_time').value,
+    notes: document.getElementById('notes').value,
+    entries: [...exercisesEl.children].map(block => ({
+      exercise_id: block.querySelector('.exercise-select').value,
+      new_name: block.querySelector('input[name$="_new_name"]').value,
+      sets: [...block.querySelectorAll('.sets .set-row')].map(row => ({
+        weight_kg: row.querySelector('input[name$="_weight"]').value,
+        reps: row.querySelector('input[name$="_reps"]').value,
+      })),
+      endurance: Object.fromEntries(
+        ENDURANCE_KEYS.map(k => [k, block.querySelector(`input[name$="_${k}"]`).value])
+      ),
+    })),
+  };
+}
+
+// ============================================================
+// 2) Lokale Sicherung auf dem Gerät (falls Verbindung/Login weg ist)
+//    Existiert nur, solange es Eingaben gibt, die noch NICHT in der DB sind.
+// ============================================================
+const BACKUP_KEY = `workout-backup-${PAGE.workout_id}`;
+
+function writeBackup() {
+  try { localStorage.setItem(BACKUP_KEY, JSON.stringify({ ts: Date.now(), state: readState() })); } catch (e) {}
+}
+function readBackup() {
+  try { return JSON.parse(localStorage.getItem(BACKUP_KEY)); } catch (e) { return null; }
+}
+function clearBackup() {
+  try { localStorage.removeItem(BACKUP_KEY); } catch (e) {}
+}
+
+// ============================================================
+// 3) Automatisch speichern
+// ============================================================
+let dirty = false;        // gibt es Änderungen, die noch nicht in der DB sind?
+let saving = false;       // läuft gerade ein Speichervorgang?
+let loggedOut = false;    // Sitzung abgelaufen -> nur noch lokal sichern, bis neu eingeloggt
+let debounceTimer = null;
+let retryTimer = null;
+
+function setStatus(state, message = '') {
+  const time = new Date().toLocaleTimeString('de-AT', { hour: '2-digit', minute: '2-digit' });
+  const texts = {
+    saved: `✓ Gespeichert ${time}`,
+    pending: 'Wird gleich gespeichert …',
+    saving: 'Speichert …',
+    offline: 'Keine Verbindung – Eingaben sind auf diesem Gerät gesichert und werden automatisch nachgespeichert.',
+    login: `Sitzung abgelaufen – Eingaben sind auf diesem Gerät gesichert. <a href="${PAGE.login_url}">Neu einloggen</a>`,
+    error: message,
+  };
+  statusEl.innerHTML = texts[state];
+  statusEl.className = `save-status ${state}`;
+}
+
+// Neue Übung wird gerade getippt? Dann noch nicht anlegen ("Kre", "Kreu", ...)
+function isNewNameField(el) {
+  return el && el.name && el.name.endsWith('_new_name');
+}
+
+// mode: 'now' = sofort speichern, 'later' = nach 1 s Tipp-Pause, 'backup' = nur lokal sichern
+function markDirty(mode) {
+  dirty = true;
+  writeBackup();
+  if (loggedOut) return;   // Hinweis mit Login-Link stehen lassen
+  setStatus('pending');
+  clearTimeout(debounceTimer);
+  if (mode === 'now') saveNow();
+  if (mode === 'later') debounceTimer = setTimeout(saveNow, 1000);
+}
+
+// Vom Server neu angelegte Übungen ins Formular übernehmen
+function applyCreated(created) {
+  for (const [n, ex] of Object.entries(created || {})) {
+    const option = `<option value="${ex.id}" data-type="${ex.type}"></option>`;
+    const selects = [...document.querySelectorAll('.exercise-select'),
+                     document.getElementById('exercise-template').content.querySelector('select')];
+    selects.forEach(sel => {
+      if (!sel.querySelector(`option[value="${ex.id}"]`)) {
+        sel.insertAdjacentHTML('beforeend', option);
+        sel.lastElementChild.textContent = ex.name;
+      }
+    });
+    const block = exercisesEl.querySelector(`.exercise-block[data-n="${n}"]`);
+    if (block) {
+      block.querySelector('.exercise-select').value = ex.id;
+      block.querySelector('input[name$="_new_name"]').value = '';
+    }
+  }
+}
+
+function buildFormData() {
+  const data = new FormData(form);
+  // Übungsname, der gerade noch getippt wird, beim Speichern weglassen
+  const active = document.activeElement;
+  const skipped = isNewNameField(active) && active.value.trim() !== '';
+  if (skipped) data.set(active.name, '');
+  return { data, skipped };
+}
+
+async function saveNow() {
+  clearTimeout(debounceTimer);
+  clearTimeout(retryTimer);
+  if (saving || !dirty || loggedOut) return !dirty;
+  saving = true;
+  dirty = false;
+  setStatus('saving');
+
+  const { data, skipped } = buildFormData();
+  let ok = false;
+  try {
+    const res = await fetch(PAGE.autosave_url, {
+      method: 'POST', body: data, headers: { 'X-Requested-With': 'fetch' },
+    });
+    const json = await res.json().catch(() => ({ ok: false, error: 'Unerwartete Antwort vom Server.' }));
+    if (res.status === 401) {
+      dirty = true; loggedOut = true; setStatus('login');
+    } else if (!json.ok) {
+      dirty = true; setStatus('error', json.error);
+    } else {
+      applyCreated(json.created);
+      ok = true;
+    }
+  } catch (e) {
+    // Netzwerk weg oder Server schläft (Render) -> in 5 s nochmal probieren
+    dirty = true; setStatus('offline');
+    retryTimer = setTimeout(saveNow, 5000);
+  }
+  saving = false;
+
+  if (!ok) return false;
+  if (dirty) return saveNow();          // während des Speicherns wurde weiter getippt
+  if (skipped) { writeBackup(); setStatus('pending'); return true; }
+  clearBackup();
+  setStatus('saved');
+  return true;
+}
+
+// Alles speichern und warten, bis es fertig ist (vor "End Workout" / "Fertig")
+async function flush() {
+  if (document.activeElement) document.activeElement.blur();   // löst "change" aus
+  await new Promise(r => setTimeout(r, 50));
+  while (saving) await new Promise(r => setTimeout(r, 100));
+  return dirty ? saveNow() : true;
+}
+
+// ============================================================
+// 4) Ereignisse
+// ============================================================
+form.addEventListener('input', (ev) => markDirty(isNewNameField(ev.target) ? 'backup' : 'later'));
+form.addEventListener('change', () => markDirty('now'));
+document.querySelectorAll('input[name="workout_type"]').forEach(r => r.addEventListener('change', applyType));
+
 exercisesEl.addEventListener('click', (ev) => {
   const action = ev.target.dataset.action;
   const block = ev.target.closest('.exercise-block');
   if (action === 'add-set') addSet(block);
-  if (action === 'remove-exercise') block.remove();
+  if (action === 'remove-exercise') { block.remove(); markDirty('now'); }
+});
+document.getElementById('add-exercise').addEventListener('click', () => addExercise());
+
+// Verbindung wieder da -> sofort nachspeichern
+window.addEventListener('online', () => { if (dirty) saveNow(); });
+
+// App/Tab wird verlassen -> letzter Speicherversuch (die lokale Sicherung gibt es sowieso)
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'hidden' || !dirty || saving) return;
+  const { data, skipped } = buildFormData();
+  if (skipped) return;
+  fetch(PAGE.autosave_url, { method: 'POST', body: data, keepalive: true,
+                             headers: { 'X-Requested-With': 'fetch' } }).catch(() => {});
 });
 
-document.getElementById('add-exercise').addEventListener('click', () => addExercise());
-document.querySelectorAll('input[name="workout_type"]').forEach(r => r.addEventListener('change', applyType));
+document.getElementById('finish-btn').addEventListener('click', async (ev) => {
+  const btn = ev.target;
+  btn.disabled = true;
+  const ok = await flush();
+  if (!ok) {
+    alert('Speichern hat nicht geklappt (siehe Meldung oben). Deine Eingaben sind auf diesem Gerät gesichert.');
+    btn.disabled = false;
+    return;
+  }
+  clearBackup();
+  if (PAGE.is_active) document.getElementById('end-form').submit();
+  else window.location.href = PAGE.detail_url;
+});
 
-if (INITIAL) {
-  // Bearbeiten: Formular mit den gespeicherten Daten füllen
-  document.querySelector(`input[name="workout_type"][value="${INITIAL.type_id}"]`).checked = true;
-  document.getElementById('date').value = INITIAL.date;
-  document.getElementById('start_time').value = INITIAL.start_time;
-  document.getElementById('notes').value = INITIAL.notes;
-  INITIAL.entries.forEach(e => addExercise(e));
-  if (INITIAL.entries.length === 0) addExercise();
+// Beendetes Workout wieder aktiv machen (vorher alles speichern)
+const resumeBtn = document.getElementById('resume-btn');
+if (resumeBtn) {
+  resumeBtn.addEventListener('click', async () => {
+    resumeBtn.disabled = true;
+    if (!(await flush())) {
+      alert('Speichern hat nicht geklappt (siehe Meldung oben). Deine Eingaben sind auf diesem Gerät gesichert.');
+      resumeBtn.disabled = false;
+      return;
+    }
+    clearBackup();
+    document.getElementById('resume-form').submit();
+  });
+}
+
+const discardForm = document.getElementById('discard-form');
+if (discardForm) {
+  discardForm.addEventListener('submit', (ev) => {
+    if (!confirm('Workout wirklich verwerfen? Alle Einträge werden gelöscht.')) { ev.preventDefault(); return; }
+    dirty = false;
+    clearBackup();
+  });
+}
+
+// ============================================================
+// 5) Start: gespeicherten Stand laden. Gibt es eine lokale Sicherung mit
+//    Eingaben, die es nicht mehr in die DB geschafft haben -> diese nehmen und nachspeichern.
+// ============================================================
+const backup = readBackup();
+if (backup) {
+  render(backup.state);
+  dirty = true;
+  saveNow();
 } else {
-  // Neu: Datum und Uhrzeit mit "jetzt" vorausfüllen (lokale Zeit von Handy/PC)
-  const now = new Date();
-  const pad = (n) => String(n).padStart(2, '0');
-  document.getElementById('date').value = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
-  document.getElementById('start_time').value = `${pad(now.getHours())}:${pad(now.getMinutes())}`;
-  addExercise();  // mit einer Übung starten
+  render(PAGE.initial);
+  setStatus('saved');
 }
 </script>
 
