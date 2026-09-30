@@ -839,19 +839,41 @@ def totals(workouts):
     }
 
 
-def weekly_history(workouts, today, weeks=8):
-    """Anzahl Kraft- und Ausdauer-Workouts pro Woche (älteste zuerst)."""
+CHART_WEEKS = 8   # so viele Wochen sind im Diagramm "Trainings pro Woche" gleichzeitig sichtbar
+
+
+def week_grid(workouts, today, visible=CHART_WEEKS):
+    """Daten für das Wochen-Raster am Dashboard.
+    Spalten = Kalenderwochen (ab der ersten Trainingswoche), Zeilen = Tage Mo-So.
+    Pro Tag: Liste der Workout-Typen an diesem Tag, z.B. ['strength', 'endurance'].
+    Solange das Raster nicht voll ist, stehen rechts leere (zukünftige) Wochen.
+    Ist es voll, rutscht die aktuelle Woche nach ganz rechts -> offset = Anzahl
+    der links verdeckten Wochen (per Pfeil wieder sichtbar).
+    """
     this_monday = week_start(today)
-    result = []
-    for i in range(weeks - 1, -1, -1):
-        start = this_monday - timedelta(weeks=i)
-        in_week = [w for w in workouts if start <= w["date"] < start + timedelta(days=7)]
-        result.append({
-            "label": f"KW {start.isocalendar()[1]}",
-            "strength": sum(1 for w in in_week if w["type_key"] == "strength"),
-            "endurance": sum(1 for w in in_week if w["type_key"] != "strength"),
-        })
-    return result
+    first = min([week_start(w["date"]) for w in workouts] + [this_monday])
+    weeks_until_now = (this_monday - first).days // 7 + 1          # inkl. aktueller Woche
+    total = max(weeks_until_now, visible)
+
+    types_by_day = {}
+    for w in workouts:
+        kind = "strength" if w["type_key"] == "strength" else "endurance"
+        types_by_day.setdefault(w["date"], []).append(kind)
+
+    weeks = []
+    for i in range(total):
+        monday = first + timedelta(weeks=i)
+        days = []
+        for d in range(7):
+            day = monday + timedelta(days=d)
+            days.append({
+                "types": types_by_day.get(day, []),
+                "is_today": day == today,
+                "future": day > today,
+            })
+        weeks.append({"kw": monday.isocalendar()[1], "current": monday == this_monday, "days": days})
+
+    return {"weeks": weeks, "offset": max(0, weeks_until_now - visible)}
 
 
 def exercise_trends(workouts, today):
@@ -953,15 +975,13 @@ def dashboard():
     goals = [enrich_goal(g, workouts) for g in goals]
     trends = exercise_trends(workouts, today)
 
-    history = weekly_history(workouts, today)
-    max_per_week = max([h["strength"] + h["endurance"] for h in history] + [1])
+    grid = week_grid(workouts, today)
 
     return render_template(
         "dashboard.html",
         cur=totals(this_week),
         prev=totals(last_week),
-        history=history,
-        max_per_week=max_per_week,
+        grid=grid,
         trends=trends[:8],
         goals=goals,
         hints=build_hints(workouts, trends, goals, today),

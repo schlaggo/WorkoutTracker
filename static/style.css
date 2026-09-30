@@ -257,10 +257,24 @@ button:disabled { opacity: .5; cursor: wait; }
 .hints li::marker { color: var(--warn); }
 
 .week-chart { width: 100%; height: auto; display: block; }
-.week-chart .bar-strength { fill: var(--strength); }
-.week-chart .bar-endurance { fill: var(--endurance); }
 .week-chart .label { fill: var(--faint); }
-.week-chart .count { fill: var(--text); font-weight: 600; }
+.week-chart .label.current { fill: var(--text); font-weight: 700; }
+.week-chart .cell.empty { fill: var(--surface-2); }
+.week-chart .cell.empty.future { opacity: .45; }
+.week-chart .cell.strength { fill: var(--strength); }
+.week-chart .cell.endurance { fill: var(--endurance); }
+.week-chart .today { fill: none; stroke: var(--text); stroke-width: 1.5; }
+.week-chart .wk-track { transition: transform .25s ease; }
+
+.chart-nav { display: flex; gap: 6px; }
+.chart-nav button {
+  margin: 0; padding: 0; width: 30px; height: 30px; border-radius: 50%;
+  background: var(--surface-2); color: var(--text); border: 1px solid var(--border);
+  font-size: 18px; line-height: 1;
+}
+.chart-nav button:hover { background: var(--surface-3); opacity: 1; }
+.chart-nav button:disabled { opacity: .3; cursor: default; }
+
 
 .legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: 12px; margin-top: 8px; color: var(--muted); }
 .legend span { display: inline-flex; align-items: center; gap: 6px; }

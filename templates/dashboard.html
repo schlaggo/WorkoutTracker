@@ -66,26 +66,56 @@
   </div>
 {% endif %}
 
-{# ---------- Letzte 8 Wochen (Balken als SVG) ---------- #}
-<div class="card">
-  <h2>Trainings pro Woche</h2>
-  <svg class="week-chart" viewBox="0 0 320 140" role="img" aria-label="Trainings pro Woche, letzte 8 Wochen">
-    {% for h in history %}
-      {% set x = loop.index0 * 40 + 8 %}
-      {% set hs = h.strength / max_per_week * 90 %}
-      {% set he = h.endurance / max_per_week * 90 %}
-      <rect x="{{ x }}" y="{{ 112 - hs }}" width="24" height="{{ hs }}" class="bar-strength" rx="4"/>
-      <rect x="{{ x }}" y="{{ 112 - hs - he }}" width="24" height="{{ he }}" class="bar-endurance" rx="4"/>
-      <text x="{{ x + 12 }}" y="130" text-anchor="middle" font-size="10" class="label">{{ h.label[3:] }}</text>
-      {% if h.strength + h.endurance %}
-        <text x="{{ x + 12 }}" y="{{ 107 - hs - he }}" text-anchor="middle" font-size="10" class="count">{{ h.strength + h.endurance }}</text>
-      {% endif %}
+{# ---------- Trainings pro Woche: Raster (Spalten = KW, Zeilen = Mo unten bis So oben) ---------- #}
+{% set COL = 36.75 %}{# Breite einer Wochen-Spalte: 294 / 8 sichtbare Wochen #}
+{% set ROW = 21 %}{# Höhe einer Tages-Zeile #}
+{% set CW = 28 %}{% set CH = 17 %}{# Größe eines Tages-Kästchens #}
+<div class="card week-grid" data-offset="{{ grid.offset }}" data-col="{{ COL }}">
+  <div class="workout-card-top">
+    <h2 style="margin:0;">Trainings pro Woche</h2>
+    {% if grid.offset > 0 %}
+      <div class="chart-nav">
+        <button type="button" aria-label="Frühere Wochen">‹</button>
+        <button type="button" aria-label="Spätere Wochen">›</button>
+      </div>
+    {% endif %}
+  </div>
+  <svg class="week-chart" viewBox="0 0 320 166" role="img" aria-label="Trainingstage pro Kalenderwoche">
+    {# Y-Achse: Wochentage, Mo unten bis So oben #}
+    {% for d in ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'] %}
+      <text x="0" y="{{ (6 - loop.index0) * ROW + CH / 2 }}" dominant-baseline="middle" font-size="10" class="label">{{ d }}</text>
     {% endfor %}
+    {# X-Achse: Beschriftung links unten, auf Höhe der KW-Zahlen #}
+    <text x="0" y="160" font-size="10" class="label">KW</text>
+
+    {# Sichtbarer Ausschnitt: schneidet alles außerhalb ab. Die Wochen liegen auf einer "Schiene" (wk-track), die per Pfeil verschoben wird #}
+    <svg x="26" y="0" width="294" height="166" viewBox="0 0 294 166">
+      <g class="wk-track" transform="translate({{ -grid.offset * COL }} 0)">
+        {% for wk in grid.weeks %}
+          {% set x = loop.index0 * COL + (COL - CW) / 2 %}
+          {% for day in wk.days %}
+            {% set y = (6 - loop.index0) * ROW %}
+            {% if day.types %}
+              {# mehrere Workouts am selben Tag: Kästchen wird nebeneinander aufgeteilt #}
+              {% set seg = CW / day.types|length %}
+              {% for t in day.types %}
+                <rect x="{{ x + loop.index0 * seg }}" y="{{ y }}" width="{{ seg - (0 if loop.last else 2) }}" height="{{ CH }}" rx="4" class="cell {{ t }}"/>
+              {% endfor %}
+            {% else %}
+              <rect x="{{ x }}" y="{{ y }}" width="{{ CW }}" height="{{ CH }}" rx="4" class="cell empty{{ ' future' if day.future }}"/>
+            {% endif %}
+            {% if day.is_today %}
+              <rect x="{{ x + 0.75 }}" y="{{ y + 0.75 }}" width="{{ CW - 1.5 }}" height="{{ CH - 1.5 }}" rx="4" class="today"/>
+            {% endif %}
+          {% endfor %}
+          <text x="{{ x + CW / 2 }}" y="160" text-anchor="middle" font-size="10" class="label{{ ' current' if wk.current }}">{{ wk.kw }}</text>
+        {% endfor %}
+      </g>
+    </svg>
   </svg>
   <div class="legend">
     <span><i class="dot strength"></i>Kraft</span>
     <span><i class="dot endurance"></i>Ausdauer</span>
-    <span class="muted"></span>
   </div>
 </div>
 
@@ -153,5 +183,28 @@
 {% else %}
   <div class="card"><p>Noch keine Workouts. <a href="{{ url_for('new_workout') }}">Erstes Workout starten</a></p></div>
 {% endfor %}
+
+<script>
+  // Wochen-Raster: Pfeile verschieben den sichtbaren Ausschnitt um je 1 Woche
+  document.querySelectorAll('.week-grid').forEach((card) => {
+    const buttons = card.querySelectorAll('.chart-nav button');
+    if (buttons.length < 2) return;                    // nichts verdeckt -> keine Pfeile
+    const [prevBtn, nextBtn] = buttons;
+    const track = card.querySelector('.wk-track');
+    const col = parseFloat(card.dataset.col);
+    const newest = parseInt(card.dataset.offset, 10);  // Startposition: aktuelle Woche ganz rechts
+    let offset = newest;
+
+    const update = () => {
+      track.style.transform = `translateX(${-offset * col}px)`;
+      prevBtn.disabled = offset <= 0;
+      nextBtn.disabled = offset >= newest;
+    };
+    prevBtn.addEventListener('click', () => { offset -= 1; update(); });
+    nextBtn.addEventListener('click', () => { offset += 1; update(); });
+    update();
+  });
+</script>
+
 
 {% endblock %}
