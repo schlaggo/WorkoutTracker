@@ -95,13 +95,8 @@
           {% set x = loop.index0 * COL + (COL - CW) / 2 %}
           {% for day in wk.days %}
             {% set y = (6 - loop.index0) * ROW %}
-            {% if day.types %}
-              {# mehrere Workouts am selben Tag: Kästchen wird nebeneinander aufgeteilt #}
-              {% set seg = CW / day.types|length %}
-              {% for t in day.types %}
-                <rect x="{{ x + loop.index0 * seg }}" y="{{ y }}" width="{{ seg - (0 if loop.last else 2) }}" height="{{ CH }}" rx="4" class="cell {{ t }}"/>
-              {% endfor %}
-            {% else %}
+            {% if day.kind %}
+            <rect x="{{ x }}" y="{{ y }} " width="{{ CW }}" height="{{ CH }}" rx="4" class="cell {{ day.kind }}"></rect>
               <rect x="{{ x }}" y="{{ y }}" width="{{ CW }}" height="{{ CH }}" rx="4" class="cell empty{{ ' future' if day.future }}"/>
             {% endif %}
             {% if day.is_today %}
@@ -116,6 +111,7 @@
   <div class="legend">
     <span><i class="dot strength"></i>Kraft</span>
     <span><i class="dot endurance"></i>Ausdauer</span>
+    <span><i class="dot hybrid"></i>Kraft + Ausdauer</span>
   </div>
 </div>
 
