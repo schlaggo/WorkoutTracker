@@ -16,6 +16,7 @@
       <div><span class="muted">{{ 'Eventdatum' if g.goal_type == 'event' else 'Zieldatum' }}</span><b>{{ g.target_day|long_date }}</b></div>
       {% if g.days_left is not none %}
       <div><span class="muted">Countdown</span><b>{{ g.days_left|countdown }}</b></div>
+      {% endif %}
     </div>
   {% endif %}
 
