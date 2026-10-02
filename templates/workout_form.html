@@ -466,9 +466,21 @@ document.addEventListener('visibilitychange', () => {
                              headers: { 'X-Requested-With': 'fetch' } }).catch(() => {});
 });
 
+function hasExercise(){
+  return [...exercisesEl.querySelectorAll('.exercise-block')].some(block =>
+    block.querySelector('.exercise-select').value ||
+    block.querySelector('input[name$="_new_name"]').value.trim()
+  );
+}
+
 document.getElementById('finish-btn').addEventListener('click', async (ev) => {
   const btn = ev.target;
+  if(PAGE.is_active && !hasExercise()){
+    alert('Trag mindestens eine Übung ein um das Workout zu speichern!');
+    if(!exercisesEl.querySelector('.exercise-block')) addExercise();
+  }
   btn.disabled = true;
+
   const ok = await flush();
   if (!ok) {
     alert('Speichern hat nicht geklappt (siehe Meldung oben). Deine Eingaben sind auf diesem Gerät gesichert.');

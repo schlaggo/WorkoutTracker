@@ -549,9 +549,8 @@ def end_workout(workout_id):
         return redirect(url_for("workouts_list"))
 
     if not build_workout(rows.data[0])["entries"]:
-        client.table("workouts").delete().eq("id", workout_id).execute()
-        flash("Workout ohne Übungen wurde verworfen.", "success")
-        return redirect(url_for("dashboard"))
+        flash("Trage mindestens eine Übung ein um das Workout zu speichern.", "error")
+        return redirect(url_for("edit_workout", workout_id=workout_id))
 
     client.table("workouts").update({"status": "finished"}).eq("id", workout_id).execute()
     flash("Workout beendet. Stark!", "success")
