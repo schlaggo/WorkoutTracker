@@ -973,9 +973,15 @@ def dashboard():
     today = local_today()
     workouts = load_all_workouts(client)
 
+    # Wochen-Navigation: ?w=0 = diese Woche, ?w=1 = eine Woche zurück, ...
+
     this_monday = week_start(today)
-    this_week = [w for w in workouts if w["date"] >= this_monday]
-    last_week = [w for w in workouts if this_monday - timedelta(days=7) <= w["date"] < this_monday]
+    first_monday = week_start(min((w["date"] for w in workouts), default=today))
+    max_back = max((this_monday - first_monday).days // 7, 0)
+    back = min(max(request.args.get("w", 0, type=int), 0), max_back)
+    sel_monday = this_monday - timedelta(weeks=back)
+    sel_week = [w for w in workouts if sel_monday <= w["date"] < sel_monday + timedelta(days=7)]
+    prev_week = [w for w in workouts if sel_monday - timedelta(days=7) <= w["date"] < sel_monday]
 
     goals = client.table("goals").select(GOAL_SELECT).eq("status", "active").execute().data
     goals = [enrich_goal(g, workouts) for g in goals]
@@ -985,8 +991,10 @@ def dashboard():
 
     return render_template(
         "dashboard.html",
-        cur=totals(this_week),
-        prev=totals(last_week),
+        cur=totals(sel_week),
+        prev=totals(prev_week),
+        week={"back": back, "max_back": max_back, "kw": sel_monday.isocalendar()[1],
+              "start": sel_monday, "end": sel_monday + timedelta(days=6)},
         grid=grid,
         trends=trends[:8],
         goals=goals,

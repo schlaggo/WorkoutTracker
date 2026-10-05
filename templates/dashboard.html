@@ -2,14 +2,6 @@
 {% block title %}Dashboard{% endblock %}
 {% block content %}
 
-{# Kleiner Helfer: Veränderung zur Vorwoche anzeigen #}
-{% macro delta(new, old, unit='') -%}
-  {%- set diff = new - old -%}
-  {%- if diff > 0 -%}<span class="up">+{{ diff|num }}{{ unit }}</span>
-  {%- elif diff < 0 -%}<span class="down">{{ diff|num }}{{ unit }}</span>
-  {%- else -%}<span class="muted">±0</span>{%- endif %} vs. Vorwoche
-{%- endmacro %}
-
 <div class="page-head">
   <h1>Übersicht</h1>
   <a class="btn" href="{{ url_for('new_workout') }}">Start Workout</a>
@@ -26,32 +18,48 @@
 </a>
 {% endif %}
 
-{# ---------- Diese Woche ---------- #}
-<div class="card">
+{# ---------- Wochen-Übersicht (mit Pfeilen eine KW vor/zurück) ---------- #}
+<div class="card" id="woche">
   <div class="workout-card-top">
-    <h2 style="margin:0;">Diese Woche</h2>
-    <span class="muted"><b>{{ training_days_month }}</b> Trainingstage im {{ month_name }}</span>
+    <h2 style="margin:0;">{% if week.back == 0 %}Diese Woche{% else %}KW {{ week.kw }}{% endif %}</h2>
+    <div class="chart-nav">
+      {% if week.back < week.max_back %}
+        <a href="{{ url_for('dashboard', w=week.back + 1) }}#woche" aria-label="Vorherige Woche">‹</a>
+      {% else %}
+        <span class="disabled">‹</span>
+      {% endif %}
+      {% if week.back > 0 %}
+        <a href="{{ url_for('dashboard', w=week.back - 1) if week.back > 1 else url_for('dashboard') }}#woche" aria-label="Nächste Woche">›</a>
+      {% else %}
+        <span class="disabled">›</span>
+      {% endif %}
+    </div>
   </div>
+  <p class="muted" style="margin:4px 0 0;">
+    {{ week.start.strftime('%d.%m.') }} – {{ week.end.strftime('%d.%m.') }}
+    {% if week.back == 0 %} · <b>{{ training_days_month }}</b> Trainingstage im {{ month_name }}{% endif %}
+  </p>
   <div class="kpi-grid">
     <div class="kpi">
       <span class="muted">Workouts</span>
       <b>{{ cur.count }}</b>
-      <small>Kraft {{ cur.strength }} . Ausdauer {{ cur.endurance }}</small>
+      <small>Kraft {{ cur.strength }} · Ausdauer {{ cur.endurance }}</small>
+      <small>Vorwoche: {{ prev.count }}</small>
     </div>
     <div class="kpi">
       <span class="muted">Kraft-Volumen</span>
       <b>{{ cur.volume|num(0) }} kg</b>
-      <small>{{ delta(cur.volume, prev.volume, ' kg') }}</small>
+      <small>Vorwoche: {{ prev.volume|num(0) }} kg</small>
     </div>
     <div class="kpi">
       <span class="muted">Distanz</span>
       <b>{{ cur.distance_km|num(1) }} km</b>
-      <small>{{ delta(cur.distance_km, prev.distance_km, ' km') }}</small>
+      <small>Vorwoche: {{ prev.distance_km|num(1) }} km</small>
     </div>
     <div class="kpi">
       <span class="muted">Ausdauerzeit</span>
       <b>{{ cur.duration_s|duration if cur.duration_s else '0:00' }}</b>
-      <small>Vorwoche {{ prev.duration_s|duration }}</small>
+      <small>Vorwoche: {{ prev.duration_s|duration if prev.duration_s else '0:00' }}</small>
     </div>
   </div>
 </div>

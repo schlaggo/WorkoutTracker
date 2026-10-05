@@ -269,13 +269,14 @@ button:disabled { opacity: .5; cursor: wait; }
 .week-chart .wk-track { transition: transform .25s ease; }
 
 .chart-nav { display: flex; gap: 6px; }
-.chart-nav button {
+.chart-nav button, .chart-nav a, .chart-nav span {
   margin: 0; padding: 0; width: 30px; height: 30px; border-radius: 50%;
   background: var(--surface-2); color: var(--text); border: 1px solid var(--border);
   font-size: 18px; line-height: 1;
+  display: inline-flex; align-items: center; justify-content: center; text-decoration: none;
 }
-.chart-nav button:hover { background: var(--surface-3); opacity: 1; }
-.chart-nav button:disabled { opacity: .3; cursor: default; }
+.chart-nav button:hover, .chart-nav a:hover { background: var(--surface-3); opacity: 1; }
+.chart-nav button:disabled, .chart-nav span.disabled { opacity: .3; cursor: default; }
 
 
 .legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: 12px; margin-top: 8px; color: var(--muted); }
