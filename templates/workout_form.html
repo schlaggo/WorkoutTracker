@@ -70,7 +70,7 @@
     </div>
 
     <select name="ex___N___id" class="exercise-select">
-      <option value="">-- neue Übung unten eintragen --</option>
+      <option value="">-- Übung auswählen --</option>
       {% for ex in exercises %}
         <option value="{{ ex.id }}" data-type="{{ ex.workout_type_id }}">{{ ex.name }}</option>
       {% endfor %}
@@ -256,6 +256,15 @@ function addExercise(data = null) {
   }
   applyType();
 }
+// Textfeld "neue Übung" nur ausfüllbar, wenn im Dropdown keine Übung gewählt ist
+function syncNewNameFields() {
+  exercisesEl.querySelectorAll('.exercise-block').forEach(block => {
+    const input = block.querySelector('input[name$="_new_name"]');
+    const chosen = block.querySelector('.exercise-select').value !== '';
+    if (chosen) input.value = '';
+    input.disabled = chosen;
+  });
+}
 
 // Je nach Trainingstyp: passende Felder und nur passende Übungen anzeigen
 function applyType() {
@@ -269,6 +278,7 @@ function applyType() {
     if (sel.selectedOptions[0] && sel.selectedOptions[0].hidden) sel.value = '';
   });
   document.querySelectorAll('#exercises .exercise-block').forEach(b => applyLast(b));
+  syncNewNameFields();
 }
 
 // Kompletten Stand ins Formular schreiben (vom Server ODER aus der lokalen Sicherung)
@@ -377,6 +387,7 @@ function applyCreated(created) {
       block.querySelector('input[name$="_new_name"]').value = '';
     }
   }
+  syncNewNameFields();
 }
 
 function buildFormData() {
@@ -451,7 +462,10 @@ exercisesEl.addEventListener('click', (ev) => {
 document.getElementById('add-exercise').addEventListener('click', () => addExercise());
 
 exercisesEl.addEventListener('change', (ev) =>{
-  if (ev.target.matches('.exercise-select')) applyLast(ev.target.closest('.exercise-block'), true);
+  if (ev.target.matches('.exercise-select')) {
+    applyLast(ev.target.closest('.exercise-block'), true);
+    syncNewNameFields();
+  }
 });
 
 // Verbindung wieder da -> sofort nachspeichern
