@@ -104,7 +104,7 @@
           {% for day in wk.days %}
             {% set y = (6 - loop.index0) * ROW %}
             {% if day.kind %}
-              <rect x="{{ x }}" y="{{ y }} " width="{{ CW }}" height="{{ CH }}" rx="4" class="cell {{ day.kind }}"></rect>
+              <rect x="{{ x }}" y="{{ y }}" width="{{ CW }}" height="{{ CH }}" rx="4" class="cell {{ day.kind }} clickable" data-day="{{ day.date }}"></rect>
             {% else %}
               <rect x="{{ x }}" y="{{ y }}" width="{{ CW }}" height="{{ CH }}" rx="4" class="cell empty{{ ' future' if day.future }}"/>
             {% endif %}
@@ -122,6 +122,9 @@
     <span><i class="dot endurance"></i>Ausdauer</span>
     <span><i class="dot hybrid"></i>Kraft + Ausdauer</span>
   </div>
+  {# Auswahl, wenn an einem Tag mehrere Workouts sind (wird per JS befüllt) #}
+  <div class="day-panel" hidden></div>
+  <script type="application/json" class="day-data">{{ day_workouts|tojson }}</script>
 </div>
 
 {# ---------- Entwicklung ---------- #}
@@ -208,6 +211,54 @@
     prevBtn.addEventListener('click', () => { offset -= 1; update(); });
     nextBtn.addEventListener('click', () => { offset += 1; update(); });
     update();
+  });
+  // Wochen-Raster: Klick auf einen Trainingstag -> 1 Workout: direkt zu den Details,
+
+  // mehrere Workouts: kleine Auswahl unter dem Diagramm
+
+  document.querySelectorAll('.week-grid').forEach((card) => {
+    const data = JSON.parse(card.querySelector('.day-data').textContent);
+    const panel = card.querySelector('.day-panel');
+    const WD = ['So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa'];
+
+    card.querySelectorAll('.cell.clickable').forEach((cell) => {
+      cell.addEventListener('click', () => {
+        const day = cell.dataset.day;
+        const list = data[day] || [];
+        if (list.length === 1) { window.location.href = list[0].url; return; }
+        // Gleicher Tag nochmal angetippt -> Auswahl wieder schließen
+        const wasOpen = !panel.hidden && panel.dataset.day === day;
+        card.querySelectorAll('.cell.selected').forEach((c) => c.classList.remove('selected'));
+        if (wasOpen || !list.length) { panel.hidden = true; return; }
+        cell.classList.add('selected');
+        
+        const [y, m, d] = day.split('-');
+        const title = document.createElement('strong');
+        title.textContent = `${WD[new Date(y, m - 1, d).getDay()]} ${d}.${m}. · ${list.length} Workouts`;
+        panel.replaceChildren(title);
+        list.forEach((w) => {
+          const row = document.createElement('a');
+          row.className = 'day-panel-row';
+          row.href = w.url;
+          const top = document.createElement('div');
+          top.className = 'workout-card-top';
+          const tag = document.createElement('span');
+          tag.className = `tag ${w.type_key}`;
+          tag.textContent = w.type_label;
+          const time = document.createElement('span');
+          time.className = 'muted';
+          time.textContent = w.time ? `${w.time} →` : '→';
+          top.append(tag, time);
+          const names = document.createElement('div');
+          names.className = 'muted';
+          names.textContent = w.names;
+          row.append(top, names);
+          panel.append(row);
+        });
+        panel.dataset.day = day;
+        panel.hidden = false;
+      });
+    });
   });
 </script>
 

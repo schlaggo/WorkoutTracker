@@ -873,6 +873,7 @@ def week_grid(workouts, today, visible=CHART_WEEKS):
             else: 
                 kind = None
             days.append({
+                "date": day.isoformat(),
                 "kind": kind,
                 "is_today": day == today, 
                 "future": day > today,
@@ -989,6 +990,17 @@ def dashboard():
 
     grid = week_grid(workouts, today)
 
+    # Workouts pro Tag fürs Diagramm: Klick auf einen Tag -> Details
+    day_workouts = {}
+    for w in sorted(workouts, key=lambda w: (w["date"], w["start_time"] or "")):
+        day_workouts.setdefault(w["date"].isoformat(), []).append({
+            "url": url_for("workout_detail", workout_id=w["id"]),
+            "type_key": w["type_key"],
+            "type_label": w["type_label"],
+            "time": w["start_time"],
+            "names": " · ".join(e["name"] for e in w["entries"]) or "Keine Übungen",
+        })
+
     return render_template(
         "dashboard.html",
         cur=totals(sel_week),
@@ -996,6 +1008,7 @@ def dashboard():
         week={"back": back, "max_back": max_back, "kw": sel_monday.isocalendar()[1],
               "start": sel_monday, "end": sel_monday + timedelta(days=6)},
         grid=grid,
+        day_workouts=day_workouts,
         trends=trends[:8],
         goals=goals,
         hints=build_hints(workouts, trends, goals, today),

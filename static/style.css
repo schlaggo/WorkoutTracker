@@ -267,6 +267,14 @@ button:disabled { opacity: .5; cursor: wait; }
 .week-chart .cell.hybrid { fill: var(--hybrid); }
 .week-chart .today { fill: none; stroke: var(--text); stroke-width: 1.5; }
 .week-chart .wk-track { transition: transform .25s ease; }
+.week-chart .cell.clickable { cursor: pointer; }
+.week-chart .cell.clickable:hover { opacity: .8; }
+.week-chart .cell.selected { stroke: var(--text); stroke-width: 1.5; }
+.day-panel { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
+.day-panel-row { display: block; color: inherit; text-decoration: none; padding: 10px 0; border-bottom: 1px solid var(--border); }
+.day-panel-row:last-child { border-bottom: none; padding-bottom: 0; }
+.day-panel-row .muted { font-size: 13px; margin-top: 4px; }
+
 
 .chart-nav { display: flex; gap: 6px; }
 .chart-nav button, .chart-nav a, .chart-nav span {
