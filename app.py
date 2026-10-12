@@ -336,8 +336,12 @@ def logout():
 # Ablauf: Start Workout -> Workout wird SOFORT in der DB angelegt (status 'active')
 # -> jede Eingabe wird automatisch gespeichert (autosave) -> End Workout (status 'finished')
 # ------------------------------------------------------------
-def load_exercises(client):
-    return client.table("exercises").select("id, name, workout_type_id").order("name").execute().data
+def load_exercises(client, include_archived=False):
+    """Übungen fürs Dropdown. Gelöschte (archived) nur, wenn ausdrücklich gewünscht."""
+    q = client.table("exercises").select("id, name, workout_type_id, archived")
+    if not include_archived:
+        q = q.eq("archived", False)
+    return q.order("name").execute().data
 
 def normalize_name(name):
     """' Weighted  pull ups ' -> 'weighted pull ups' (zum Vergleichen von Übungsnamen)"""
@@ -416,8 +420,11 @@ def save_workout_form(client, workout_id, form):
         exercise_id = e["exercise_id"]
         if not exercise_id:  # neuer Name eingetippt
             if known is None:
-                known = load_exercises(client)
+                known = load_exercises(client, include_archived=True)
             row = find_exercise(known, e["new_name"], workout_type)
+            if row and row.get("archived"):  # gelöschte Übung wieder eingetippt -> zurückholen
+                client.table("exercises").update({"archived": False}).eq("id", row["id"]).execute()
+                row["archived"] = False
             if row is None:  # gibt es wirklich noch nicht -> anlegen
                 row = client.table("exercises").insert({
                     "workout_type_id": workout_type,
@@ -480,6 +487,19 @@ def last_values(workouts, current):
                 }
     return result
 
+
+@app.route("/exercises/<exercise_id>/archive", methods=["POST"])
+@login_required
+def archive_exercise(exercise_id):
+    """Übung aus dem Dropdown löschen. Nur ausgeblendet (archived) -> alte Workouts behalten sie."""
+    client = current_client()
+    rows = (
+        client.table("exercises").update({"archived": True})
+        .eq("id", exercise_id).eq("created_by", session["user_id"]).execute()
+    )
+    if not rows.data:
+        return {"ok": False, "error": "Diese Übung kann nicht gelöscht werden."}, 404
+    return {"ok": True}
 
 @app.route("/workouts/new", methods=["GET", "POST"])
 @login_required

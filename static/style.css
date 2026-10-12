@@ -302,3 +302,13 @@ input:disabled { opacity: .4; cursor: not-allowed; }
   main { padding-top: 36px; }
   h1 { font-size: 32px; }
 }
+
+/* Dropdown + Mülleimer nebeneinander */
+.exercise-pick { display: flex; gap: 8px; align-items: center; }
+.exercise-pick select { flex: 1; min-width: 0; }
+.icon-btn {
+  flex: none; width: 46px; height: 46px; margin: 0; padding: 0;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm);
+  font-size: 18px; line-height: 1;
+}
+.icon-btn:disabled { opacity: .3; cursor: default; }

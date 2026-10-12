@@ -68,13 +68,15 @@
       <strong>Übung</strong>
       <button type="button" class="link-btn" data-action="remove-exercise">Entfernen</button>
     </div>
-
-    <select name="ex___N___id" class="exercise-select">
-      <option value="">-- Übung auswählen --</option>
-      {% for ex in exercises %}
-        <option value="{{ ex.id }}" data-type="{{ ex.workout_type_id }}">{{ ex.name }}</option>
-      {% endfor %}
-    </select>
+<div class="exercise-pick">
+      <select name="ex___N___id" class="exercise-select">
+        <option value="">-- Übung auswählen --</option>
+        {% for ex in exercises %}
+          <option value="{{ ex.id }}" data-type="{{ ex.workout_type_id }}">{{ ex.name }}</option>
+        {% endfor %}
+      </select>
+      <button type="button" class="icon-btn" data-action="delete-exercise" title="Übung aus der Liste löschen" disabled>🗑</button>
+    </div>
     <input type="text" name="ex___N___new_name" placeholder="... oder neue Übung, z.B. Kreuzheben" style="margin-top:8px;">
     <p class="last-hint" hidden></p>
 
@@ -120,6 +122,7 @@
   'workout_id': workout.id,
   'is_active': is_active,
   'autosave_url': url_for('autosave_workout', workout_id=workout.id),
+  'archive_url': url_for('archive_exercise', exercise_id='__ID__'),
   'detail_url': url_for('workout_detail', workout_id=workout.id),
   'login_url': url_for('login', next=request.path),
 } %}
@@ -458,7 +461,35 @@ exercisesEl.addEventListener('click', (ev) => {
   if (action === 'add-set') addSet(block);
   if (action === 'remove-set') {removeSet(block); markDirty('now'); }
   if (action === 'remove-exercise') { block.remove(); markDirty('now'); }
+  if (action === 'delete-exercise') deleteExercise(block);
 });
+// Übung dauerhaft aus dem Dropdown löschen (alte Workouts behalten sie)
+async function deleteExercise(block) {
+  const sel = block.querySelector('.exercise-select');
+  const id = sel.value;
+  if (!id) return;
+  const name = sel.selectedOptions[0].textContent;
+  if (!confirm(`„${name}“ aus deiner Übungsliste löschen?\n\nGespeicherte Workouts behalten die Übung.`)) return;
+  try {
+    const res = await fetch(PAGE.archive_url.replace('__ID__', id), {
+      method: 'POST', headers: { 'X-Requested-With': 'fetch' },
+    });
+    const json = await res.json().catch(() => ({ ok: false, error: 'Unerwartete Antwort vom Server.' }));
+    if (!json.ok) { alert(json.error === 'login' ? 'Sitzung abgelaufen, bitte neu einloggen.' : json.error); return; }
+  } catch (e) {
+    alert('Keine Verbindung – Übung wurde nicht gelöscht.');
+    return;
+  }
+  // Option überall entfernen (auch in der Vorlage für neue Übungsblöcke)
+  const template = document.getElementById('exercise-template').content.querySelector('select');
+  [...document.querySelectorAll('.exercise-select'), template].forEach(s => {
+    s.querySelector(`option[value="${id}"]`)?.remove();
+  });
+  exercisesEl.querySelectorAll('.exercise-block').forEach(b => applyLast(b));
+  syncNewNameFields();
+  markDirty('now');
+}
+
 document.getElementById('add-exercise').addEventListener('click', () => addExercise());
 
 exercisesEl.addEventListener('change', (ev) =>{
