@@ -123,6 +123,7 @@ def collect_exercise_blocks(form):
             "new_name": form.get(f"ex_{n}_new_name", "").strip(),
             "sets": [(form.get(f"ex_{n}_set_{m}_weight"), form.get(f"ex_{n}_set_{m}_reps")) for m in set_nums],
             "endurance": {key: form.get(f"ex_{n}_{key}") for key in ENDURANCE_KEYS},
+            "timer": form.get(f"ex_{n}_timer_s", "").strip(),
         })
     return blocks
 
@@ -133,7 +134,7 @@ def collect_exercise_blocks(form):
 # workouts -> workout_entries -> exercises + entry_metrics -> metric_definitions
 WORKOUT_SELECT = (
     "id, date, start_time, notes, status, created_at, workout_type_id, workout_types(key, label), "
-    "workout_entries(id, order_index, exercise_id, exercises(name),"
+    "workout_entries(id, order_index, exercise_id, exercises(name, is_timer),"
     "entry_metrics(set_number, value, metric_definitions(key)))"
 )
 
@@ -163,12 +164,15 @@ def build_workout(raw):
         entries.append({
             "exercise_id":e["exercise_id"],
             "name": (e.get("exercises") or {}).get("name", "?"),
+            "is_timer": bool((e.get("exercises") or {}).get("is_timer")),
             "sets": [sets[n] for n in sorted(sets)],
             "endurance": endurance,
         })
 
     summary = {"sets": 0, "volume": 0, "distance_km": 0, "duration_s": 0}
     for e in entries:
+        if e["is_timer"]:
+            continue
         for st in e["sets"]:
             summary["sets"] += 1
             if "weight_kg" in st and "reps" in st:
@@ -338,7 +342,7 @@ def logout():
 # ------------------------------------------------------------
 def load_exercises(client, include_archived=False):
     """Übungen fürs Dropdown. Gelöschte (archived) nur, wenn ausdrücklich gewünscht."""
-    q = client.table("exercises").select("id, name, workout_type_id, archived")
+    q = client.table("exercises").select("id, name, workout_type_id, archived, is_timer, created_by")
     if not include_archived:
         q = q.eq("archived", False)
     return q.order("name").execute().data
@@ -352,7 +356,7 @@ def find_exercise(exercises, name, workout_type):
     """Gibt es diese Übung (gleicher Name, egal ob groß/klein, gleicher Typ) schon? -> Zeile oder None"""
     wanted = normalize_name(name)
     return next((x for x in exercises
-                 if normalize_name(x["name"]) == wanted and x["workout_type_id"] == workout_type), None)
+                 if normalize_name(x["name"]) == wanted and (x["workout_type_id"] == workout_type or x.get("is_timer"))), None)
 
 def active_workout_id(client):
     """ID des laufenden Workouts oder None."""
@@ -374,7 +378,9 @@ def parse_workout_form(form, is_strength):
             if not b["exercise_id"] and not b["new_name"]:
                 continue  # leerer Übungsblock -> ignorieren
             metrics = []  # Liste von (metrik_key, satz_nummer, wert)
-            if is_strength:
+            if b["timer"]:
+                metrics.append(("duration_s", None, parse_duration(b["timer"])))
+            elif is_strength:
                 set_no = 0
                 for weight, reps in b["sets"]:
                     weight, reps = to_float(weight), to_float(reps)
@@ -676,6 +682,8 @@ def goal_progress(goal, workouts):
     values = []
     for w in workouts:
         for e in w["entries"]:
+            if e["is_timer"]:
+                continue
             if goal["exercise_id"] and e["exercise_id"] != goal["exercise_id"]:
                 continue
             values += [s[key] for s in e["sets"] if key in s]
@@ -916,6 +924,8 @@ def exercise_trends(workouts, today):
         if not period:
             continue
         for e in w["entries"]:
+            if e["is_timer"]:
+                continue
             d = data.setdefault(e["name"], {
                 "name": e["name"], "last": w["date"], "kind": "strength" if e["sets"] else "endurance",
                 "recent": [], "prev": [], "km": 0, "sec": {"recent": 0, "prev": 0}, "dist": {"recent": 0, "prev": 0},

@@ -72,7 +72,9 @@
         <select name="ex___N___id" class="exercise-select" hidden>
           <option value="">-- Übung auswählen --</option>
           {% for ex in exercises %}
-            <option value="{{ ex.id }}" data-type="{{ ex.workout_type_id }}">{{ ex.name }}</option>
+            <option value="{{ ex.id }}" data-type="{{ 'any' if ex.is_timer else ex.workout_type_id }}"
+              {%- if ex.is_timer %} data-timer="1"{% endif %}
+              {%- if ex.created_by == session.user_id %} data-own="1"{% endif %}>{{ ex.name }}</option>
           {% endfor %}
         </select>
         <button type="button" class="ex-picker-btn" data-action="toggle-picker">
@@ -98,6 +100,21 @@
       <div class="set-row">
         <div><label>Höhenmeter (m)</label><input type="text" inputmode="numeric" name="ex___N___elevation_m"></div>
         <div><label>Ø Herzfrequenz (bpm)</label><input type="text" inputmode="numeric" name="ex___N___heart_rate_avg"></div>
+      </div>
+    </div>
+    {# Warm Up / Cool Down: Zeit einstellen + Countdown #}
+    <div class="timer-fields" hidden>
+      <div class="timer-display">0:00</div>
+      <label>Zeit (min:ss)</label>
+      <input type="text" name="ex___N___timer_s" class="timer-input" placeholder="z.B. 10:00">
+      <div class="timer-presets">
+        <button type="button" class="secondary small" data-action="timer-preset" data-min="5">5 min</button>
+        <button type="button" class="secondary small" data-action="timer-preset" data-min="10">10 min</button>
+        <button type="button" class="secondary small" data-action="timer-preset" data-min="15">15 min</button>
+      </div>
+      <div class="timer-buttons">
+        <button type="button" class="timer-start" data-action="timer-start">Start</button>
+        <button type="button" class="secondary" data-action="timer-reset">Zurücksetzen</button>
       </div>
     </div>
   </div>
@@ -225,7 +242,15 @@ function applyLast(block, fillRows = false) {
       end.heart_rate_avg != null && `Ø ${fmtNum(end.heart_rate_avg)} bpm`,
     ].filter(Boolean).join(' · ');
   }
-  hint.innerHTML = '<b></b> <span class="values"></span><small>Übertreffe die vorausgefüllten Werte für maximalen Progress!</small>';
+  // Warm Up / Cool Down: Zeit vom letzten Mal direkt übernehmen (wenn noch nichts eingestellt)
+  const timerInput = block.querySelector('.timer-input');
+  if (isTimerBlock(block) && fillRows && !timerInput.value && end.duration_s != null) {
+    timerInput.value = formatDuration(end.duration_s);
+    renderTimer(block);
+  }
+  hint.innerHTML = isTimerBlock(block)
+    ? '<b></b> <span class="values"></span>'
+    : '<b></b> <span class="values"></span><small>Übertreffe die vorausgefüllten Werte für maximalen Progress!</small>';
   hint.querySelector('b').textContent = `Letztes Mal (${last.date}):`;
   hint.querySelector('.values').textContent = text;
   hint.hidden = false;
@@ -259,6 +284,11 @@ function addExercise(data = null) {
     block.querySelector('input[name$="_new_name"]').value = data.new_name || '';
     data.sets.forEach(s => addSet(block, s));
     if (data.sets.length === 0) addSet(block);
+    if (isTimerBlock(block)) {   // Warm Up / Cool Down: gespeicherte Zeit ins Timer-Feld
+      const d = (data.endurance || {}).duration_s;
+      if (d != null) block.querySelector('.timer-input').value = formatDuration(d);
+      data = { ...data, endurance: {} };
+    }
     for (const [key, value] of Object.entries(data.endurance || {})) {
       const input = block.querySelector(`input[name="ex_${n}_${key}"]`);
       if (input) input.value = (key === 'duration_s' && typeof value === 'number') ? formatDuration(value) : value;
@@ -285,17 +315,49 @@ function syncNewNameFields() {
 
 // Je nach Trainingstyp: passende Felder und nur passende Übungen anzeigen
 function applyType() {
+
   const type = currentType();
-  document.querySelectorAll('.strength-fields').forEach(el => el.style.display = type === '1' ? 'block' : 'none');
-  document.querySelectorAll('.endurance-fields').forEach(el => el.style.display = type === '2' ? 'block' : 'none');
+
   document.querySelectorAll('.exercise-select option[data-type]').forEach(opt => {
-    opt.hidden = opt.dataset.type !== type;
+
+    opt.hidden = opt.dataset.type !== 'any' && opt.dataset.type !== type;   // 'any' = Warm Up / Cool Down
+
   });
+
   document.querySelectorAll('.exercise-select').forEach(sel => {
+
     if (sel.selectedOptions[0] && sel.selectedOptions[0].hidden) sel.value = '';
+
   });
-  document.querySelectorAll('#exercises .exercise-block').forEach(b => applyLast(b));
+
+  document.querySelectorAll('#exercises .exercise-block').forEach(b => { applyFields(b); applyLast(b); });
+
   syncNewNameFields();
+
+}
+
+
+
+// Ist im Block Warm Up / Cool Down gewählt?
+
+function isTimerBlock(block) {
+
+  const opt = block.querySelector('.exercise-select').selectedOptions[0];
+
+  return !!(opt && opt.dataset.timer);
+
+}
+
+// Passende Eingabefelder im Block zeigen: Timer, Kraft-Sätze oder Ausdauer-Werte
+function applyFields(block) {
+  const timer = isTimerBlock(block);
+  const type = currentType();
+  block.querySelector('.strength-fields').style.display = !timer && type === '1' ? 'block' : 'none';
+  block.querySelector('.endurance-fields').style.display = !timer && type === '2' ? 'block' : 'none';
+  block.querySelector('.timer-fields').hidden = !timer;
+  block.querySelector('.timer-input').disabled = !timer;   // deaktiviert = wird nicht mitgespeichert
+  if (!timer) stopTimer(block);
+  renderTimer(block);
 }
 
 // Kompletten Stand ins Formular schreiben (vom Server ODER aus der lokalen Sicherung)
@@ -475,7 +537,15 @@ exercisesEl.addEventListener('click', (ev) => {
   const block = ev.target.closest('.exercise-block');
   if (action === 'add-set') addSet(block);
   if (action === 'remove-set') {removeSet(block); markDirty('now'); }
-  if (action === 'remove-exercise') { closeMenu(); block.remove(); markDirty('now'); }
+  if (action === 'remove-exercise') { closeMenu(); stopTimer(block); block.remove(); markDirty('now'); }
+  if (action === 'timer-start') toggleTimer(block);
+  if (action === 'timer-reset') { stopTimer(block); renderTimer(block); }
+  if (action === 'timer-preset') {
+    stopTimer(block);
+    block.querySelector('.timer-input').value = `${btn.dataset.min}:00`;
+    renderTimer(block);
+    markDirty('now');
+  }
   if (action === 'toggle-picker') toggleMenu(block);
   if (action === 'pick-exercise') pickExercise(block, btn.closest('li').dataset.id);
   if (action === 'use-new-name') useNewName(block);
@@ -516,14 +586,15 @@ function renderMenu() {
   const query = menuSearch.value.trim().toLowerCase();
   const options = [...sel.options].filter(o =>
     o.value && !o.hidden && o.textContent.toLowerCase().includes(query));
+    options.sort((a,b) => (b.dataset.timer ? 1 : 0) -  (a.dataset.timer ? 1 : 0));
 
   menuList.innerHTML = '';
   options.forEach(o => {
     const li = document.createElement('li');
     li.dataset.id = o.value;
     if (o.value === sel.value) li.classList.add('selected');
-    li.innerHTML = `<button type="button" class="ex-menu-pick" data-action="pick-exercise"></button>
-                    <button type="button" class="ex-menu-del" data-action="delete-exercise" title="Übung löschen">🗑</button>`;
+    li.innerHTML = `<button type="button" class="ex-menu-pick" data-action="pick-exercise"></button>` +
+      (o.dataset.own ? `<button type="button" class="ex-menu-del" data-action="delete-exercise" title="Übung löschen">🗑</button>` : '');
     li.querySelector('.ex-menu-pick').textContent = o.textContent;
     menuList.appendChild(li);
   });
@@ -604,11 +675,96 @@ async function deleteExercise(id) {
   markDirty('now');
 }
 
+// ============================================================
+// Warm Up / Cool Down: Countdown
+// Läuft über die Endzeit (nicht über Mitzählen) -> stimmt auch, wenn das Handy kurz gesperrt war.
+// Der Countdown selbst wird nicht gespeichert, nur die eingestellte Zeit.
+// ============================================================
+function parseDurationInput(text) {   // "10:00" -> 600, "1:02:05" -> 3725, "10" -> 600 (nur Zahl = Minuten)
+  const parts = (text || '').trim().split(':');
+  if (!parts[0] || parts.length > 3 || !parts.every(p => /^\d+$/.test(p.trim()))) return null;
+  const n = parts.map(Number);
+  if (n.length === 1) return n[0] * 60;
+  if (n.length === 2) return n[0] * 60 + n[1];
+  return n[0] * 3600 + n[1] * 60 + n[2];
+}
+function renderTimer(block) {
+  const t = block._timer || {};
+  const fields = block.querySelector('.timer-fields');
+  let left;
+  if (t.endAt) left = Math.max(0, Math.ceil((t.endAt - Date.now()) / 1000));
+  else if (t.left != null) left = t.left;
+  else left = parseDurationInput(block.querySelector('.timer-input').value) || 0;
+  block.querySelector('.timer-display').textContent = t.done ? 'Fertig ✓' : formatDuration(left);
+  block.querySelector('.timer-start').textContent = t.endAt ? 'Pause' : (t.left != null && !t.done ? 'Weiter' : 'Start');
+  fields.classList.toggle('running', !!t.endAt);
+  fields.classList.toggle('done', !!t.done);
+}
+
+function toggleTimer(block) {
+  const t = block._timer || (block._timer = {});
+  if (t.endAt) {   // läuft -> pausieren
+    t.left = Math.max(0, Math.ceil((t.endAt - Date.now()) / 1000));
+    clearInterval(t.interval);
+    t.endAt = null;
+    releaseWakeLock();
+  } else {         // starten bzw. weiterlaufen lassen
+    if (t.done) { t.done = false; t.left = null; }
+    const seconds = t.left ?? parseDurationInput(block.querySelector('.timer-input').value);
+    if (!seconds) { block.querySelector('.timer-input').focus(); return; }
+    t.endAt = Date.now() + seconds * 1000;
+    t.left = null;
+    t.interval = setInterval(() => tickTimer(block), 250);
+    requestWakeLock();
+  }
+  renderTimer(block);
+}
+
+function tickTimer(block) {
+  const t = block._timer;
+  if (t.endAt && Date.now() >= t.endAt) {   // abgelaufen
+    clearInterval(t.interval);
+    t.endAt = null;
+    t.left = 0;
+    t.done = true;
+    releaseWakeLock();
+  }
+  renderTimer(block);
+}
+
+function stopTimer(block) {
+  const t = block._timer;
+  if (!t) return;
+  clearInterval(t.interval);
+  if (t.endAt) releaseWakeLock();
+  block._timer = null;
+}
+
+// Bildschirm bleibt an, solange ein Timer läuft (wo der Browser das kann)
+let wakeLock = null;
+async function requestWakeLock() {
+  try { if ('wakeLock' in navigator && !wakeLock) wakeLock = await navigator.wakeLock.request('screen'); } catch (e) {}
+}
+function releaseWakeLock() {
+  const running = [...exercisesEl.querySelectorAll('.exercise-block')].some(b => b._timer && b._timer.endAt);
+  if (!running && wakeLock) { wakeLock.release().catch(() => {}); wakeLock = null; }
+}
+
+// Zeit geändert (während der Timer nicht läuft) -> Anzeige neu
+exercisesEl.addEventListener('input', (ev) => {
+  if (ev.target.matches('.timer-input')) {
+    const block = ev.target.closest('.exercise-block');
+    if (!(block._timer && block._timer.endAt)) { stopTimer(block); renderTimer(block); }
+  }
+});
+
 document.getElementById('add-exercise').addEventListener('click', () => addExercise());
 
 exercisesEl.addEventListener('change', (ev) =>{
-  if (ev.target.matches('.exercise-select')) {
-    applyLast(ev.target.closest('.exercise-block'), true);
+    if (ev.target.matches('.exercise-select')) {
+    const block = ev.target.closest('.exercise-block');
+    applyFields(block);
+    applyLast(block, true);
     syncNewNameFields();
   }
 });

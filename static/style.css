@@ -339,3 +339,16 @@ input:disabled { opacity: .4; cursor: not-allowed; }
 }
 .ex-menu-del:hover { background: rgba(255, 92, 99, .12); opacity: 1; }
 .ex-menu-empty { padding: 10px; color: var(--faint); font-size: 14px; }
+
+/* Warm Up / Cool Down: Countdown */
+.timer-fields .timer-display {
+  margin: 14px 0 4px; text-align: center;
+  font-size: 48px; font-weight: 700; letter-spacing: 1px; font-variant-numeric: tabular-nums;
+}
+.timer-fields.running .timer-display { color: var(--accent); }
+.timer-fields.done .timer-display { color: var(--accent); animation: timer-blink 1s ease-in-out 5; }
+.exercise-block:has(.timer-fields.done) { border-color: var(--accent); }
+@keyframes timer-blink { 50% { opacity: .25; } }
+.timer-presets { display: flex; gap: 8px; }
+.timer-buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.timer-buttons button { margin-top: 14px; }
