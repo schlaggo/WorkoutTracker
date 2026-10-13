@@ -68,13 +68,6 @@
       <strong>Übung</strong>
       <button type="button" class="link-btn" data-action="remove-exercise">Entfernen</button>
     </div>
-<div class="exercise-pick">
-      <select name="ex___N___id" class="exercise-select">
-        <option value="">-- Übung auswählen --</option>
-        {% for ex in exercises %}
-          <option value="{{ ex.id }}" data-type="{{ ex.workout_type_id }}">{{ ex.name }}</option>
-        {% endfor %}
-      </select>
         <div class="ex-picker">
         <select name="ex___N___id" class="exercise-select" hidden>
           <option value="">-- Übung auswählen --</option>
@@ -86,7 +79,6 @@
           <span class="ex-picker-label">Übung auswählen</span><span class="ex-picker-caret">▾</span>
         </button>
       </div>
-    </div>
     <input type="text" name="ex___N___new_name" placeholder="... oder neue Übung, z.B. Kreuzheben" style="margin-top:8px;">
     <p class="last-hint" hidden></p>
 
