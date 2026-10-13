@@ -75,7 +75,17 @@
           <option value="{{ ex.id }}" data-type="{{ ex.workout_type_id }}">{{ ex.name }}</option>
         {% endfor %}
       </select>
-      <button type="button" class="icon-btn" data-action="delete-exercise" title="Übung aus der Liste löschen" disabled>🗑</button>
+        <div class="ex-picker">
+        <select name="ex___N___id" class="exercise-select" hidden>
+          <option value="">-- Übung auswählen --</option>
+          {% for ex in exercises %}
+            <option value="{{ ex.id }}" data-type="{{ ex.workout_type_id }}">{{ ex.name }}</option>
+          {% endfor %}
+        </select>
+        <button type="button" class="ex-picker-btn" data-action="toggle-picker">
+          <span class="ex-picker-label">Übung auswählen</span><span class="ex-picker-caret">▾</span>
+        </button>
+      </div>
     </div>
     <input type="text" name="ex___N___new_name" placeholder="... oder neue Übung, z.B. Kreuzheben" style="margin-top:8px;">
     <p class="last-hint" hidden></p>
@@ -100,6 +110,13 @@
     </div>
   </div>
 </template>
+
+{# ---------- Aufklappmenü der Übungsauswahl (gibt es nur EINMAL, wird in den jeweiligen Übungsblock verschoben) ---------- #}
+<div id="ex-menu" class="ex-menu" hidden>
+  <input type="search" class="ex-menu-search" placeholder="Übung suchen …"
+         autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+  <ul class="ex-menu-list"></ul>
+</div>
 
 {# ---------- Vorlage für EINEN Satz. __M__ = Satznummer ---------- #}
 <template id="set-template">
@@ -259,13 +276,18 @@ function addExercise(data = null) {
   }
   applyType();
 }
+
 // Textfeld "neue Übung" nur ausfüllbar, wenn im Dropdown keine Übung gewählt ist
 function syncNewNameFields() {
   exercisesEl.querySelectorAll('.exercise-block').forEach(block => {
     const input = block.querySelector('input[name$="_new_name"]');
-    const chosen = block.querySelector('.exercise-select').value !== '';
+    const sel = block.querySelector('.exercise-select');
+    const chosen = sel.value !== '';
     if (chosen) input.value = '';
     input.disabled = chosen;
+    const label = block.querySelector('.ex-picker-label');
+    label.textContent = chosen ? sel.selectedOptions[0].textContent : 'Übung auswählen';
+    label.classList.toggle('placeholder', !chosen);
   });
 }
 
@@ -456,20 +478,119 @@ form.addEventListener('change', () => markDirty('now'));
 document.querySelectorAll('input[name="workout_type"]').forEach(r => r.addEventListener('change', applyType));
 
 exercisesEl.addEventListener('click', (ev) => {
-  const action = ev.target.dataset.action;
+  const btn = ev.target.closest('[data-action]');
+  const action = btn ? btn.dataset.action : null;
   const block = ev.target.closest('.exercise-block');
   if (action === 'add-set') addSet(block);
   if (action === 'remove-set') {removeSet(block); markDirty('now'); }
-  if (action === 'remove-exercise') { block.remove(); markDirty('now'); }
-  if (action === 'delete-exercise') deleteExercise(block);
+  if (action === 'remove-exercise') { closeMenu(); block.remove(); markDirty('now'); }
+  if (action === 'toggle-picker') toggleMenu(block);
+  if (action === 'pick-exercise') pickExercise(block, btn.closest('li').dataset.id);
+  if (action === 'use-new-name') useNewName(block);
+  if (action === 'delete-exercise') deleteExercise(btn.closest('li').dataset.id);
 });
-// Übung dauerhaft aus dem Dropdown löschen (alte Workouts behalten sie)
-async function deleteExercise(block) {
+
+// ============================================================
+// Übungsauswahl: eigenes Aufklappmenü mit Suchfeld und 🗑 pro Übung.
+// Das echte <select> bleibt versteckt im Block -> Autosave & Co. laufen unverändert.
+// ============================================================
+const menu = document.getElementById('ex-menu');
+const menuSearch = menu.querySelector('.ex-menu-search');
+const menuList = menu.querySelector('.ex-menu-list');
+let menuBlock = null;   // Übungsblock, in dem das Menü gerade offen ist
+
+function toggleMenu(block) {
+  if (menuBlock === block) { closeMenu(); return; }
+  menuBlock = block;
+  block.querySelector('.ex-picker').appendChild(menu);
+  menu.hidden = false;
+  block.querySelector('.ex-picker-btn').classList.add('open');
+  menuSearch.value = '';
+  renderMenu();
+  menuSearch.focus();
+}
+
+function closeMenu() {
+  if (!menuBlock) return;
+  menuBlock.querySelector('.ex-picker-btn').classList.remove('open');
+  menu.hidden = true;
+  menuBlock = null;
+}
+
+// Liste neu aufbauen: nur Übungen des aktuellen Trainingstyps, gefiltert nach Suchtext
+function renderMenu() {
+  if (!menuBlock) return;
+  const sel = menuBlock.querySelector('.exercise-select');
+  const query = menuSearch.value.trim().toLowerCase();
+  const options = [...sel.options].filter(o =>
+    o.value && !o.hidden && o.textContent.toLowerCase().includes(query));
+
+  menuList.innerHTML = '';
+  options.forEach(o => {
+    const li = document.createElement('li');
+    li.dataset.id = o.value;
+    if (o.value === sel.value) li.classList.add('selected');
+    li.innerHTML = `<button type="button" class="ex-menu-pick" data-action="pick-exercise"></button>
+                    <button type="button" class="ex-menu-del" data-action="delete-exercise" title="Übung löschen">🗑</button>`;
+    li.querySelector('.ex-menu-pick').textContent = o.textContent;
+    menuList.appendChild(li);
+  });
+
+  // Nichts gefunden bzw. Suchtext ist keine vorhandene Übung -> als neue Übung anbieten
+  const exact = options.some(o => o.textContent.toLowerCase() === query);
+  if (query && !exact) {
+    const li = document.createElement('li');
+    li.innerHTML = '<button type="button" class="ex-menu-new" data-action="use-new-name"></button>';
+    li.querySelector('button').textContent = `+ „${menuSearch.value.trim()}“ als neue Übung`;
+    menuList.appendChild(li);
+  }
+  if (!menuList.children.length) {
+    menuList.innerHTML = '<li class="ex-menu-empty">Noch keine Übungen – einfach oben eintippen.</li>';
+  }
+}
+
+// Übung auswählen -> wie eine normale Auswahl im Dropdown (löst Autosave, "Letztes Mal" usw. aus)
+function pickExercise(block, id) {
   const sel = block.querySelector('.exercise-select');
-  const id = sel.value;
-  if (!id) return;
-  const name = sel.selectedOptions[0].textContent;
-  if (!confirm(`„${name}“ aus deiner Übungsliste löschen?\n\nGespeicherte Workouts behalten die Übung.`)) return;
+  sel.value = id;
+  closeMenu();
+  sel.dispatchEvent(new Event('change', { bubbles: true }));
+}
+
+// Suchtext als neue Übung übernehmen
+function useNewName(block) {
+  const name = menuSearch.value.trim();
+  const sel = block.querySelector('.exercise-select');
+  sel.value = '';
+  closeMenu();
+  sel.dispatchEvent(new Event('change', { bubbles: true }));
+  const input = block.querySelector('input[name$="_new_name"]');
+  input.value = name;
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+  markDirty('now');
+}
+
+// Suchfeld: filtern, aber KEIN Autosave auslösen (gehört nicht zum Workout)
+menuSearch.addEventListener('input', (ev) => { ev.stopPropagation(); renderMenu(); });
+menuSearch.addEventListener('change', (ev) => ev.stopPropagation());
+menuSearch.addEventListener('keydown', (ev) => {
+  if (ev.key === 'Escape') { closeMenu(); return; }
+  if (ev.key === 'Enter') {   // Enter = ersten Treffer nehmen
+    ev.preventDefault();
+    const first = menuList.querySelector('[data-action]');
+    if (first) first.click();
+  }
+});
+// Klick außerhalb schließt das Menü
+document.addEventListener('click', (ev) => {
+  if (menuBlock && !ev.target.closest('.ex-picker')) closeMenu();
+});
+
+// Übung dauerhaft aus der Liste löschen (alte Workouts behalten sie)
+async function deleteExercise(id) {
+  const option = document.querySelector(`.exercise-select option[value="${id}"]`);
+  if (!option) return;
+  if (!confirm(`„${option.textContent}“ aus deiner Übungsliste löschen?\n\nGespeicherte Workouts behalten die Übung.`)) return;
   try {
     const res = await fetch(PAGE.archive_url.replace('__ID__', id), {
       method: 'POST', headers: { 'X-Requested-With': 'fetch' },
@@ -487,6 +608,7 @@ async function deleteExercise(block) {
   });
   exercisesEl.querySelectorAll('.exercise-block').forEach(b => applyLast(b));
   syncNewNameFields();
+  renderMenu();
   markDirty('now');
 }
 
