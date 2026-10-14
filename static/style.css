@@ -350,5 +350,29 @@ input:disabled { opacity: .4; cursor: not-allowed; }
 .exercise-block:has(.timer-fields.done) { border-color: var(--accent); }
 @keyframes timer-blink { 50% { opacity: .25; } }
 .timer-presets { display: flex; gap: 8px; }
-.timer-buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-.timer-buttons button { margin-top: 14px; }
+.timer-buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }.timer-buttons button { margin-top: 14px; }
+
+/* Timer stellen: Räder für Minuten / Sekunden (wie am Handy) */
+.timer-picker {
+  position: relative; display: flex; justify-content: center; align-items: center; gap: 4px;
+  height: 200px; margin-top: 10px;
+}
+.timer-picker[hidden] { display: none; }
+.timer-picker::before {   /* Markierung der gewählten Zeile */
+  content: ""; position: absolute; left: 0; right: 0; top: 50%; height: 44px; transform: translateY(-50%);
+  background: var(--surface-3); border-radius: var(--radius-sm);
+}
+
+.wheel {
+  position: relative; width: 64px; height: 200px; padding: 78px 0;   /* (200 - 44) / 2 */
+  overflow-y: scroll; scroll-snap-type: y mandatory; scrollbar-width: none;
+  -webkit-mask-image: linear-gradient(transparent, #000 30%, #000 70%, transparent);
+          mask-image: linear-gradient(transparent, #000 30%, #000 70%, transparent);
+}
+.wheel::-webkit-scrollbar { display: none; }
+.wheel div {
+  height: 44px; line-height: 44px; text-align: center; scroll-snap-align: center;
+  font-size: 26px; color: var(--faint); font-variant-numeric: tabular-nums; cursor: pointer;
+}
+.wheel div.sel { color: var(--text); font-weight: 600; }
+.wheel-unit { position: relative; margin-right: 12px; font-size: 15px; color: var(--muted); }

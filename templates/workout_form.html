@@ -104,9 +104,13 @@
     </div>
     {# Warm Up / Cool Down: Zeit einstellen + Countdown #}
     <div class="timer-fields" hidden>
-      <div class="timer-display">0:00</div>
-      <label>Zeit (min:ss)</label>
-      <input type="text" name="ex___N___timer_s" class="timer-input" placeholder="z.B. 10:00">
+      {# Zeit einstellen wie beim Handy-Timer: zwei Räder für Minuten und Sekunden #}
+      <div class="timer-picker">
+        <div class="wheel" data-unit="min"></div><span class="wheel-unit">min</span>
+        <div class="wheel" data-unit="sec"></div><span class="wheel-unit">sek</span>
+      </div>
+      <div class="timer-display" hidden>0:00</div>
+      <input type="hidden" name="ex___N___timer_s" class="timer-input">
       <div class="timer-presets">
         <button type="button" class="secondary small" data-action="timer-preset" data-min="5">5 min</button>
         <button type="button" class="secondary small" data-action="timer-preset" data-min="10">10 min</button>
@@ -286,7 +290,7 @@ function addExercise(data = null) {
     if (data.sets.length === 0) addSet(block);
     if (isTimerBlock(block)) {   // Warm Up / Cool Down: gespeicherte Zeit ins Timer-Feld
       const d = (data.endurance || {}).duration_s;
-      if (d != null) block.querySelector('.timer-input').value = formatDuration(d);
+      if (d != null && d !== '') block.querySelector('.timer-input').value = typeof d === 'number' ? formatDuration(d) : d;
       data = { ...data, endurance: {} };
     }
     for (const [key, value] of Object.entries(data.endurance || {})) {
@@ -389,6 +393,8 @@ function readState() {
       endurance: Object.fromEntries(
         ENDURANCE_KEYS.map(k => [k, block.querySelector(`input[name$="_${k}"]`).value])
       ),
+      // Warm Up / Cool Down: eingestellte Zeit mitsichern
+      ...(isTimerBlock(block) ? { endurance: { duration_s: block.querySelector('.timer-input').value } } : {}),
     })),
   };
 }
@@ -586,7 +592,8 @@ function renderMenu() {
   const query = menuSearch.value.trim().toLowerCase();
   const options = [...sel.options].filter(o =>
     o.value && !o.hidden && o.textContent.toLowerCase().includes(query));
-    options.sort((a,b) => (b.dataset.timer ? 1 : 0) -  (a.dataset.timer ? 1 : 0));
+    const rank = o => !o.dataset.timer ? 2 : /^warm/i.test(o.textContent.trim()) ? 0 : 1;
+    options.sort((a, b) => rank(a) - rank(b));   // Warm Up, Cool Down, dann alle anderen
 
   menuList.innerHTML = '';
   options.forEach(o => {
@@ -688,17 +695,76 @@ function parseDurationInput(text) {   // "10:00" -> 600, "1:02:05" -> 3725, "10"
   if (n.length === 2) return n[0] * 60 + n[1];
   return n[0] * 3600 + n[1] * 60 + n[2];
 }
+
 function renderTimer(block) {
   const t = block._timer || {};
   const fields = block.querySelector('.timer-fields');
+  const idle = !t.endAt && t.left == null && !t.done;   // noch nicht gestartet -> Räder zum Einstellen zeigen
   let left;
   if (t.endAt) left = Math.max(0, Math.ceil((t.endAt - Date.now()) / 1000));
   else if (t.left != null) left = t.left;
   else left = parseDurationInput(block.querySelector('.timer-input').value) || 0;
+  block.querySelector('.timer-picker').hidden = !idle;
+  block.querySelector('.timer-display').hidden = idle;
   block.querySelector('.timer-display').textContent = t.done ? 'Fertig ✓' : formatDuration(left);
   block.querySelector('.timer-start').textContent = t.endAt ? 'Pause' : (t.left != null && !t.done ? 'Weiter' : 'Start');
   fields.classList.toggle('running', !!t.endAt);
   fields.classList.toggle('done', !!t.done);
+  if (idle && !fields.hidden) syncWheels(block);
+}
+// ------------------------------------------------------------
+// Räder für Minuten / Sekunden (wie der Timer am Handy)
+// Die Räder schreiben die Zeit ins versteckte Feld ex_N_timer_s -> wird wie bisher gespeichert.
+// ------------------------------------------------------------
+const WHEEL_ITEM = 44;   // Höhe einer Zeile im Rad in px (muss zu .wheel div im CSS passen)
+
+function buildWheels(block) {
+  block.querySelectorAll('.wheel').forEach(wheel => {
+    if (wheel.children.length) return;   // schon aufgebaut
+    for (let i = 0; i < 60; i++) {
+      const item = document.createElement('div');
+      item.textContent = wheel.dataset.unit === 'sec' ? String(i).padStart(2, '0') : i;
+      item.addEventListener('click', () => wheel.scrollTo({ top: i * WHEEL_ITEM, behavior: 'smooth' }));
+      wheel.appendChild(item);
+    }
+    wheel.addEventListener('scroll', () => {
+      markWheel(wheel);
+      clearTimeout(wheel._settle);   // erst übernehmen, wenn das Rad stehen bleibt
+      wheel._settle = setTimeout(() => commitWheels(block), 120);
+    });
+  });
+}
+
+function wheelIndex(wheel) {
+  return Math.min(59, Math.max(0, Math.round(wheel.scrollTop / WHEEL_ITEM)));
+}
+
+function markWheel(wheel) {
+  const i = wheelIndex(wheel);
+  [...wheel.children].forEach((el, j) => el.classList.toggle('sel', j === i));
+}
+
+// Räder -> verstecktes Feld (löst Autosave aus)
+function commitWheels(block) {
+  const [minWheel, secWheel] = block.querySelectorAll('.wheel');
+  const m = wheelIndex(minWheel), s = wheelIndex(secWheel);
+  const value = m || s ? `${m}:${String(s).padStart(2, '0')}` : '';
+  const input = block.querySelector('.timer-input');
+  if (value !== input.value) {
+    input.value = value;
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+}
+
+// Verstecktes Feld -> Räder (z.B. nach Schnellwahl oder Zeit vom letzten Mal)
+function syncWheels(block) {
+  buildWheels(block);
+  const total = parseDurationInput(block.querySelector('.timer-input').value) || 0;
+  const target = [Math.min(59, Math.floor(total / 60)), total % 60];
+  block.querySelectorAll('.wheel').forEach((wheel, i) => {
+    if (wheelIndex(wheel) !== target[i]) wheel.scrollTop = target[i] * WHEEL_ITEM;
+    markWheel(wheel);
+  });
 }
 
 function toggleTimer(block) {
