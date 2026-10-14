@@ -112,9 +112,9 @@
       <div class="timer-display" hidden>0:00</div>
       <input type="hidden" name="ex___N___timer_s" class="timer-input">
       <div class="timer-presets">
-        <button type="button" class="secondary small" data-action="timer-preset" data-min="5">5 min</button>
+        <!-- <button type="button" class="secondary small" data-action="timer-preset" data-min="5">5 min</button>
         <button type="button" class="secondary small" data-action="timer-preset" data-min="10">10 min</button>
-        <button type="button" class="secondary small" data-action="timer-preset" data-min="15">15 min</button>
+        <button type="button" class="secondary small" data-action="timer-preset" data-min="15">15 min</button> -->
       </div>
       <div class="timer-buttons">
         <button type="button" class="timer-start" data-action="timer-start">Start</button>
@@ -546,12 +546,12 @@ exercisesEl.addEventListener('click', (ev) => {
   if (action === 'remove-exercise') { closeMenu(); stopTimer(block); block.remove(); markDirty('now'); }
   if (action === 'timer-start') toggleTimer(block);
   if (action === 'timer-reset') { stopTimer(block); renderTimer(block); }
-  if (action === 'timer-preset') {
+  /*if (action === 'timer-preset') {
     stopTimer(block);
     block.querySelector('.timer-input').value = `${btn.dataset.min}:00`;
     renderTimer(block);
     markDirty('now');
-  }
+  }*/
   if (action === 'toggle-picker') toggleMenu(block);
   if (action === 'pick-exercise') pickExercise(block, btn.closest('li').dataset.id);
   if (action === 'use-new-name') useNewName(block);
