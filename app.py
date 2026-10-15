@@ -634,11 +634,11 @@ def end_workout(workout_id):
     if not rows.data:
         flash("Workout nicht gefunden.", "error")
         return redirect(url_for("workouts_list"))
-        
+
     if not build_workout(rows.data[0])["entries"]:
         flash("Trage mindestens eine Übung ein um das Workout zu speichern.", "error")
         return redirect(url_for("edit_workout", workout_id=workout_id))
-     client.table("workouts").update({
+    client.table("workouts").update({
         "status": "finished",
         "end_time": datetime.now(TIMEZONE).isoformat(),   # für die Trainingsdauer
     }).eq("id", workout_id).execute()
