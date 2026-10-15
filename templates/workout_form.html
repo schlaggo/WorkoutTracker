@@ -457,7 +457,7 @@ function markDirty(mode) {
 // Vom Server neu angelegte Übungen ins Formular übernehmen
 function applyCreated(created) {
   for (const [n, ex] of Object.entries(created || {})) {
-    const option = `<option value="${ex.id}" data-type="${ex.type}"></option>`;
+    const option = `<option value="${ex.id}" data-type="${ex.type}"${ex.own ? ' data-own="1"' : ''}></option>`;
     const selects = [...document.querySelectorAll('.exercise-select'),
                      document.getElementById('exercise-template').content.querySelector('select')];
     selects.forEach(sel => {

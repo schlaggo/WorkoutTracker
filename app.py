@@ -440,7 +440,10 @@ def save_workout_form(client, workout_id, form):
                 }).execute().data[0]
                 known.append(row)
             exercise_id = row["id"]
-            created[str(e["n"])] = {"id": exercise_id, "name": row["name"], "type": workout_type}
+            created[str(e["n"])] = {
+                "id": exercise_id, "name": row["name"], "type": workout_type,
+                "own": row.get("created_by") == session["user_id"],
+            }
         payload_entries.append({
             "exercise_id": exercise_id,
             "metrics": [{"key": k, "set_number": n, "value": v} for k, n, v in e["metrics"]],
