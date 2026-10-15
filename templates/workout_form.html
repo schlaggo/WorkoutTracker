@@ -142,6 +142,7 @@
       <label>Wiederholungen</label>
       <input type="text" inputmode="numeric" name="ex___N___set___M___reps">
     </div>
+    <p class="set-praise" hidden></p>
   </div>
 </template>
 
@@ -198,12 +199,35 @@ function fmtNum(v) {
 function lastFor(block) {
   return PAGE.last[block.querySelector('.exercise-select').value] || null;
 }
-
-// Platzhalter für Satz Nr. i (0 = erster Satz)
 function setRowPlaceholder(block, row, i) {
   const s = ((lastFor(block) || {}).sets || [])[i] || {};
   row.querySelector('input[name$="_weight"]').placeholder = s.weight_kg != null ? fmtNum(s.weight_kg) : '';
   row.querySelector('input[name$="_reps"]').placeholder = s.reps != null ? fmtNum(s.reps) : '';
+  setPraise(block, row, i);
+}
+
+// Lob, wenn ein Satz besser ist als der gleiche Satz letztes Mal:
+// mehr Gewicht (mit Wiederholungen) oder gleiches Gewicht mit mehr Wiederholungen
+function toNum(v) {
+  const n = parseFloat(String(v).replace(',', '.'));
+  return isNaN(n) ? null : n;
+}
+function setPraise(block, row, i) {
+  const el = row.querySelector('.set-praise');
+  const last = ((lastFor(block) || {}).sets || [])[i];
+  const weight = toNum(row.querySelector('input[name$="_weight"]').value);
+  const reps = toNum(row.querySelector('input[name$="_reps"]').value);
+  let text = null;
+  if (last && reps) {
+    const lw = last.weight_kg ?? null, lr = last.reps ?? null;
+    if (weight != null && ((lw == null && weight > 0) || (lw != null && weight > lw))) {
+      text = `+${fmtNum(+(weight - (lw || 0)).toFixed(2))} kg`;
+    } else if (weight === lw && lr != null && reps > lr) {
+      text = `+${fmtNum(reps - lr)} Wdh.`;
+    }
+  }
+  el.hidden = !text;
+  if (text) el.textContent = `💪 Stark! ${text} mehr als letztes Mal`;
 }
 
 // Platzhalter + Hinweis für einen Übungsblock setzen.
@@ -815,6 +839,12 @@ function releaseWakeLock() {
   const running = [...exercisesEl.querySelectorAll('.exercise-block')].some(b => b._timer && b._timer.endAt);
   if (!running && wakeLock) { wakeLock.release().catch(() => {}); wakeLock = null; }
 }
+
+// Gewicht/Wdh. eingetippt -> Lob neu prüfen
+exercisesEl.addEventListener('input', (ev) => {
+  const row = ev.target.closest('.sets .set-row');
+  if (row) setPraise(row.closest('.exercise-block'), row, [...row.parentElement.children].indexOf(row));
+});
 
 // Zeit geändert (während der Timer nicht läuft) -> Anzeige neu
 exercisesEl.addEventListener('input', (ev) => {

@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block title %}Workout abgeschlossen{% endblock %}
+{% block content %}
+
+{# Abschluss-Seite nach "End Workout" #}
+{% set strength = w.summary.sets > 0 %}
+{% set exercise_count = w.entries|rejectattr('is_timer')|list|length %}
+
+<div class="card summary-hero">
+  <div class="summary-icon">{{ '🏆' if progress else '💪' }}</div>
+  <h1>Workout abgeschlossen!</h1>
+  <p class="muted">{{ w.date|long_date }} · {{ w.type_label }}</p>
+  {% if progress %}
+    <p class="summary-praise">Stark! {{ progress|length }} {{ 'Übung' if progress|length == 1 else 'Übungen' }} besser als letztes Mal.</p>
+  {% else %}
+    <p class="summary-praise">Gut gemacht – jedes Training zählt!</p>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h2>Gesamtstatistik</h2>
+  <div class="kpi-grid">
+    {% if duration %}
+      <div class="kpi"><span class="muted">Trainingsdauer</span><b>{{ duration|hm }}</b></div>
+    {% endif %}
+    <div class="kpi"><span class="muted">Übungen</span><b>{{ exercise_count }}</b></div>
+    {% if strength %}
+      <div class="kpi"><span class="muted">Sätze</span><b>{{ w.summary.sets }}</b></div>
+      <div class="kpi"><span class="muted">Wiederholungen</span><b>{{ w.summary.reps|num(0) }}</b></div>
+    {% endif %}
+    {% if w.summary.volume %}
+      <div class="kpi"><span class="muted">Volumen</span><b>{{ w.summary.volume|num(0) }} kg</b></div>
+    {% endif %}
+    {% if w.summary.distance_km %}
+      <div class="kpi"><span class="muted">Distanz</span><b>{{ w.summary.distance_km|num(2) }} km</b></div>
+    {% endif %}
+    {% if w.summary.duration_s %}
+      <div class="kpi"><span class="muted">Bewegungszeit</span><b>{{ w.summary.duration_s|duration }}</b></div>
+    {% endif %}
+    {% if w.summary.distance_km and w.summary.duration_s %}
+      <div class="kpi"><span class="muted">Ø Pace</span><b>{{ (w.summary.duration_s / w.summary.distance_km)|pace }} /km</b></div>
+    {% endif %}
+  </div>
+</div>
+
+{% if strength %}
+
+<div class="card">
+  <h2>Fortschritte</h2>
+  {% for p in progress %}
+    <div class="progress-item">
+      <b>💪 {{ p.name }}</b>
+      <span class="muted">{{ p.changes|join(' · ') }}</span>
+    </div>
+  {% else %}
+    <p class="muted">Diesmal keine neuen Bestwerte gegenüber dem letzten Mal – beim nächsten Training wieder angreifen!</p>
+  {% endfor %}
+</div>
+{% endif %}
+
+<a class="btn summary-btn" href="{{ url_for('dashboard') }}">Zur Übersicht</a>
+<a class="btn edit-btn" href="{{ url_for('workout_detail', workout_id=w.id) }}">Workout ansehen</a>
+
+{% endblock %}

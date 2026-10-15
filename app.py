@@ -133,7 +133,7 @@ def collect_exercise_blocks(form):
 # Supabase kann verknüpfte Tabellen direkt mitladen ("embedding"):
 # workouts -> workout_entries -> exercises + entry_metrics -> metric_definitions
 WORKOUT_SELECT = (
-    "id, date, start_time, notes, status, created_at, workout_type_id, workout_types(key, label), "
+    "id, date, start_time, end_time, notes, status, created_at, workout_type_id, workout_types(key, label), "
     "workout_entries(id, order_index, exercise_id, exercises(name, is_timer),"
     "entry_metrics(set_number, value, metric_definitions(key)))"
 )
@@ -169,12 +169,13 @@ def build_workout(raw):
             "endurance": endurance,
         })
 
-    summary = {"sets": 0, "volume": 0, "distance_km": 0, "duration_s": 0}
+    summary = {"sets": 0, "reps": 0, "volume": 0, "distance_km": 0, "duration_s": 0}
     for e in entries:
         if e["is_timer"]:
             continue
         for st in e["sets"]:
             summary["sets"] += 1
+            summary["reps"] += st.get("reps", 0)
             if "weight_kg" in st and "reps" in st:
                 summary["volume"] += st["weight_kg"] * st["reps"]
         summary["distance_km"] += e["endurance"].get("distance_km", 0)
@@ -188,6 +189,8 @@ def build_workout(raw):
         "start_time": (raw.get("start_time") or "")[:5] or None,
         "notes": raw.get("notes"),
         "status": raw.get("status") or "finished",   # 'active' = läuft gerade
+        "created_at": raw.get("created_at"),
+        "end_time": raw.get("end_time"),
         "type_key": wtype.get("key"),
         "type_label": wtype.get("label", ""),
         "entries": entries,
@@ -222,6 +225,11 @@ def format_duration(seconds):
     m, s = divmod(rest, 60)
     return f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}"
 
+@app.template_filter("hm")
+def format_hours_minutes(seconds):
+    """4320 -> '1 h 12 min', 2880 -> '48 min' (für die Trainingsdauer)"""
+    h, m = divmod(round(seconds / 60), 60)
+    return f"{h} h {m:02d} min" if h else f"{m} min"
 
 @app.template_filter("pace")
 def format_pace(seconds_per_km):
@@ -496,6 +504,56 @@ def last_values(workouts, current):
                 }
     return result
 
+# ------------------------------------------------------------
+# Fortschritt & Abschluss-Statistik
+# ------------------------------------------------------------
+def set_progress(now, last):
+    """Vergleicht einen Satz mit dem gleichen Satz vom letzten Mal.
+    Mehr Gewicht (mit Wiederholungen) oder gleiches Gewicht mit mehr Wdh. = Fortschritt.
+    Rückgabe: '+2,5 kg' / '+2 Wdh.' oder None.
+    """
+    reps, last_reps = now.get("reps"), last.get("reps")
+    weight, last_weight = now.get("weight_kg"), last.get("weight_kg")
+    if not reps:
+        return None
+    if weight is not None and ((last_weight is None and weight > 0)
+                               or (last_weight is not None and weight > last_weight)):
+        return f"+{format_number(weight - (last_weight or 0))} kg"
+    if weight == last_weight and last_reps is not None and reps > last_reps:
+        return f"+{format_number(reps - last_reps, 0)} Wdh."
+    return None
+
+def workout_progress(w, last):
+    """Fortschritte pro Übung gegenüber dem letzten Mal.
+    Rückgabe: [{"name": "Bankdrücken", "changes": ["Satz 1: +2,5 kg", ...]}, ...]
+    """
+    result = []
+    for e in w["entries"]:
+        prev = (last.get(e["exercise_id"]) or {}).get("sets") or []
+        changes = []
+        for i, s in enumerate(e["sets"]):
+            if i < len(prev):
+                p = set_progress(s, prev[i])
+                if p:
+                    changes.append(f"Satz {i + 1}: {p}")
+        if changes:
+            result.append({"name": e["name"], "changes": changes})
+    return result
+
+def workout_duration(w):
+    """Sekunden von Start (Datum + Uhrzeit) bis "End Workout" – oder None, wenn nicht sinnvoll."""
+    if not w["end_time"]:
+        return None
+    end = datetime.fromisoformat(w["end_time"])
+    if w["start_time"]:
+        start = datetime.combine(w["date"], datetime.strptime(w["start_time"], "%H:%M").time(), TIMEZONE)
+    elif w["created_at"]:
+        start = datetime.fromisoformat(w["created_at"])
+    else:
+        return None
+    seconds = (end - start).total_seconds()
+    return seconds if 0 < seconds <= 6 * 3600 else None   # nachgetragene Workouts nicht mitzählen
+
 
 @app.route("/exercises/<exercise_id>/archive", methods=["POST"])
 @login_required
@@ -576,14 +634,33 @@ def end_workout(workout_id):
     if not rows.data:
         flash("Workout nicht gefunden.", "error")
         return redirect(url_for("workouts_list"))
-
+        
     if not build_workout(rows.data[0])["entries"]:
         flash("Trage mindestens eine Übung ein um das Workout zu speichern.", "error")
         return redirect(url_for("edit_workout", workout_id=workout_id))
+     client.table("workouts").update({
+        "status": "finished",
+        "end_time": datetime.now(TIMEZONE).isoformat(),   # für die Trainingsdauer
+    }).eq("id", workout_id).execute()
+    return redirect(url_for("workout_summary", workout_id=workout_id))
 
-    client.table("workouts").update({"status": "finished"}).eq("id", workout_id).execute()
-    flash("Workout beendet. Stark!", "success")
-    return redirect(url_for("workout_detail", workout_id=workout_id))
+
+@app.route("/workouts/<workout_id>/summary")
+@login_required
+def workout_summary(workout_id):
+    """Abschluss-Seite nach "End Workout": Gesamtstatistik + Fortschritte."""
+    client = current_client()
+    rows = client.table("workouts").select(WORKOUT_SELECT).eq("id", workout_id).execute()
+    if not rows.data:
+        flash("Workout nicht gefunden.", "error")
+        return redirect(url_for("workouts_list"))
+    w = build_workout(rows.data[0])
+    return render_template(
+        "workout_summary.html",
+        w=w,
+        duration=workout_duration(w),
+        progress=workout_progress(w, last_values(load_all_workouts(client), w)),
+    )
 
 @app.route("/workouts/<workout_id>/resume", methods=["POST"])
 @login_required

@@ -376,3 +376,17 @@ input:disabled { opacity: .4; cursor: not-allowed; }
 }
 .wheel div.sel { color: var(--text); font-weight: 600; }
 .wheel-unit { position: relative; margin-right: 12px; font-size: 15px; color: var(--muted); }
+
+/* Lob direkt beim Satz, wenn er besser ist als letztes Mal */
+.set-praise { grid-column: 1 / -1; margin: -2px 0 2px; font-size: 13px; font-weight: 600; color: var(--accent); }
+
+/* Abschluss-Seite nach "End Workout" */
+.summary-hero { text-align: center; }
+.summary-hero h1 { margin: 6px 0 4px; }
+.summary-icon { font-size: 44px; line-height: 1; }
+.summary-praise { margin: 12px 0 0; font-weight: 600; color: var(--accent); }
+.progress-item { padding: 10px 0; border-top: 1px solid var(--border); }
+.progress-item:first-of-type { border-top: none; padding-top: 0; }
+.progress-item b, .progress-item span { display: block; }
+.progress-item span { margin-top: 2px; }
+.summary-btn { display: block; width: 100%; }
