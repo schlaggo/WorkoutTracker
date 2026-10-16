@@ -75,7 +75,8 @@
             <option value="{{ ex.id }}" data-type="{{ 'any' if ex.is_timer else ex.workout_type_id }}"
               {%- if ex.is_timer %} data-timer="1"{% endif %}
               {%- if ex.created_by == session.user_id %} data-own="1"{% endif %}
-              {%- if ex.bw_factor %} data-bw="{{ ex.bw_factor|float }}"{% endif %}>{{ ex.name }}</option>
+              {%- if ex.bw_factor %} data-bw="{{ ex.bw_factor|float }}"{% endif %}
+              {%- if ex.is_timed %} data-timed="1"{% endif %}>{{ ex.name }}</option>
           {% endfor %}
         </select>
         <button type="button" class="ex-picker-btn" data-action="toggle-picker">
@@ -86,12 +87,13 @@
     <p class="last-hint" hidden></p>
 
     <div class="strength-fields">
-      {# Körpergewichtsübung? Wird an der Übung gemerkt -> nur einmal einstellen.
+      {# Erfassungsart: Gewicht / Körpergewicht / Zeit. Wird an der Übung gemerkt -> nur einmal einstellen.
          Wie viel vom Körpergewicht zählt, bestimmt der Server anhand des Übungsnamens. #}
-      <div class="toggle-group bw-toggle">
-        <label><input type="checkbox" class="bw-check"> Körpergewicht</label>
+      <div class="toggle-group mode-toggle">
+        <label><input type="radio" name="ex___N___mode" value="" checked> Gewicht</label>
+        <label><input type="radio" name="ex___N___mode" value="bw"> Körpergewicht</label>
+        <label><input type="radio" name="ex___N___mode" value="time"> Zeit</label>
       </div>
-      <input type="hidden" name="ex___N___bw" class="bw-input">
       <div class="sets"></div>
       <div class="set-buttons">
         <button type="button" class="secondary small" data-action="add-set">+ Satz</button>
@@ -141,11 +143,19 @@
 {# ---------- Vorlage für EINEN Satz. __M__ = Satznummer ---------- #}
 <template id="set-template">
   <div class="set-row">
+    <div class="time-col">
+      <label>Satz __M__ — Zeit</label>
+      <input type="text" name="ex___N___set___M___time" placeholder="m:ss">
+    </div>
+    <div class="dist-col">
+      <label>Distanz (m)</label>
+      <input type="text" inputmode="numeric" name="ex___N___set___M___dist">
+    </div>
     <div class="weight-col">
-      <label>Satz __M__ — Gewicht (kg)</label>
+      <label><span class="set-no">Satz __M__ — </span>Gewicht (kg)</label>
       <input type="text" inputmode="decimal" name="ex___N___set___M___weight">
     </div>
-    <div>
+    <div class="reps-col">
       <label><span class="bw-set-no">Satz __M__ — </span>Wiederholungen</label>
       <input type="text" inputmode="numeric" name="ex___N___set___M___reps">
     </div>
@@ -192,6 +202,11 @@ function addSet(block, values = {}) {
   const row = setsEl.lastElementChild;
   row.querySelector('input[name$="_weight"]').value = values.weight_kg ?? '';
   row.querySelector('input[name$="_reps"]').value = values.reps ?? '';
+  // Zeitübung: Sekunden aus der DB -> "3:45", Distanz km aus der DB -> Meter
+  const t = values.duration_s;
+  row.querySelector('input[name$="_time"]').value = typeof t === 'number' ? formatDuration(t) : (t ?? '');
+  const dm = values.distance_m ?? (values.distance_km != null ? +(values.distance_km * 1000).toFixed(1) : '');
+  row.querySelector('input[name$="_dist"]').value = dm;
   setRowPlaceholder(block, row, m - 1);
 }
 
@@ -202,22 +217,23 @@ function fmtNum(v) {
   return typeof v === 'number' ? String(v).replace('.', ',') : v;
 }
 
-// Körpergewichtsübung? (Schalter "Körpergewicht" im Block an)
-function isBwBlock(block) {
-  return block.querySelector('.bw-check').checked;
+// Erfassungsart des Blocks: '' = Gewicht, 'bw' = Körpergewicht, 'time' = Zeit
+function blockMode(block) {
+  const r = block.querySelector('.mode-toggle input:checked');
+  return r ? r.value : '';
+}
+function isBwBlock(block) { return blockMode(block) === 'bw'; }
+function isTimedBlock(block) { return blockMode(block) === 'time'; }
+
+function setMode(block, mode) {
+  const r = block.querySelector(`.mode-toggle input[value="${mode || ''}"]`);
+  if (r) r.checked = true;
 }
 
-// Schalter setzen. value = Faktor aus der DB ("1.0", 0.65 …) oder leer
-function setBw(block, value) {
-  const on = parseFloat(value) > 0;
-  block.querySelector('.bw-check').checked = on;
-  block.querySelector('.bw-input').value = on ? '1' : '';
-}
-
-// Belastungsart der gewählten Übung in den Schalter übernehmen
-function syncBwSelect(block) {
+// Erfassungsart der gewählten Übung übernehmen (an der Übung gemerkt)
+function syncMode(block) {
   const opt = block.querySelector('.exercise-select').selectedOptions[0];
-  if (opt && opt.value) setBw(block, opt.dataset.bw);
+  if (opt && opt.value) setMode(block, opt.dataset.timed ? 'time' : opt.dataset.bw ? 'bw' : '');
 }
 
 // Letzte Werte der Übung, die in diesem Block ausgewählt ist (oder null)
@@ -226,15 +242,24 @@ function lastFor(block) {
 }
 function setRowPlaceholder(block, row, i) {
   const s = ((lastFor(block) || {}).sets || [])[i] || {};
-  // Körpergewicht: Gewichtsfeld ausblenden + deaktivieren (wird dann nicht gespeichert),
-  // Wiederholungen nehmen die ganze Breite ein
-  const bw = isBwBlock(block);
-  const weightInput = row.querySelector('input[name$="_weight"]');
-  row.classList.toggle('bw-row', bw);
-  weightInput.disabled = bw;
-  if (bw) weightInput.value = '';
-  weightInput.placeholder = s.weight_kg != null ? fmtNum(s.weight_kg) : '';
+  // Nur die Felder der Erfassungsart zeigen. Ausgeblendete Felder werden deaktiviert
+  // (= nicht gespeichert) und geleert:
+  //   Gewicht: Gewicht + Wdh. | Körpergewicht: nur Wdh. | Zeit: Zeit + Distanz + Gewicht (optional)
+  const mode = blockMode(block);
+  row.classList.toggle('bw-row', mode === 'bw');
+  row.classList.toggle('time-row', mode === 'time');
+  const show = { weight: mode !== 'bw', reps: mode !== 'time', time: mode === 'time', dist: mode === 'time' };
+  for (const [key, on] of Object.entries(show)) {
+    const input = row.querySelector(`input[name$="_${key}"]`);
+    input.disabled = !on;
+    if (!on) input.value = '';
+  }
+  row.querySelector('input[name$="_weight"]').placeholder =
+    s.weight_kg != null ? fmtNum(s.weight_kg) : (mode === 'time' ? 'optional' : '');
   row.querySelector('input[name$="_reps"]').placeholder = s.reps != null ? fmtNum(s.reps) : '';
+  row.querySelector('input[name$="_time"]').placeholder = s.duration_s != null ? formatDuration(s.duration_s) : 'm:ss';
+  row.querySelector('input[name$="_dist"]').placeholder =
+    s.distance_km != null ? fmtNum(+(s.distance_km * 1000).toFixed(1)) : 'optional';
   setPraise(block, row, i);
 }
 
@@ -244,12 +269,33 @@ function toNum(v) {
   const n = parseFloat(String(v).replace(',', '.'));
   return isNaN(n) ? null : n;
 }
+// "3:45" -> 225, "1:02:05" -> 3725, "3" -> 180 (nur Zahl = Minuten, wie am Server)
+function parseTime(v) {
+  const parts = String(v || '').trim().split(':');
+  if (!parts[0] || parts.some(p => !/^\d+$/.test(p))) return null;
+  const n = parts.map(Number);
+  if (n.length === 1) return n[0] * 60;
+  return n.reduce((acc, x) => acc * 60 + x, 0);
+}
 function setPraise(block, row, i) {
   const el = row.querySelector('.set-praise');
   const last = ((lastFor(block) || {}).sets || [])[i];
   const weight = toNum(row.querySelector('input[name$="_weight"]').value);
   const reps = toNum(row.querySelector('input[name$="_reps"]').value);
   let text = null;
+  if (isTimedBlock(block)) {   // Zeitübung: gleiche Strecke schneller oder (ohne Strecke) länger
+    const sec = parseTime(row.querySelector('input[name$="_time"]').value);
+    const dist = toNum(row.querySelector('input[name$="_dist"]').value);
+    const ld = last && last.distance_km != null ? +(last.distance_km * 1000).toFixed(1) : null;
+    const lw = last ? (last.weight_kg ?? null) : null;
+    if (last && sec && last.duration_s && dist === ld && weight === lw) {
+      if (dist && sec < last.duration_s) text = `${formatDuration(last.duration_s - sec)} schneller als letztes Mal`;
+      if (!dist && sec > last.duration_s) text = `${formatDuration(sec - last.duration_s)} länger als letztes Mal`;
+    }
+    el.hidden = !text;
+    if (text) el.textContent = `💪 Stark! ${text}`;
+    return;
+  }
   if (last && reps) {
     const lw = last.weight_kg ?? null, lr = last.reps ?? null;
     if (weight != null && ((lw == null && weight > 0) || (lw != null && weight > lw))) {
@@ -291,9 +337,19 @@ function applyLast(block, fillRows = false) {
   let text;
   if (last.sets.length) {
     // \u00a0 = geschütztes Leerzeichen: "60 kg × 10" bricht nie mitten drin um
-    text = last.sets.map(s => s.weight_kg != null && !isBwBlock(block)
-      ? `${fmtNum(s.weight_kg)}\u00a0kg\u00a0×\u00a0${fmtNum(s.reps ?? '–')}`
-      : `${fmtNum(s.reps)}\u00a0Wdh.`).join(' · ');
+    const nb = (t) => t.replaceAll(' ', '\u00a0');
+    text = last.sets.map(s => {
+      if (isTimedBlock(block)) {   // z.B. "3:45 / 1000 m / 152 kg"
+        return nb([
+          s.duration_s != null ? formatDuration(s.duration_s) : '–',
+          s.distance_km != null && `${fmtNum(+(s.distance_km * 1000).toFixed(1))} m`,
+          s.weight_kg != null && `${fmtNum(s.weight_kg)} kg`,
+        ].filter(Boolean).join(' / '));
+      }
+      return s.weight_kg != null && !isBwBlock(block)
+        ? `${fmtNum(s.weight_kg)}\u00a0kg\u00a0×\u00a0${fmtNum(s.reps ?? '–')}`
+        : `${fmtNum(s.reps ?? '–')}\u00a0Wdh.`;
+    }).join(' · ');
   } else {
     text = [
       end.distance_km != null && `${fmtNum(end.distance_km)} km`,
@@ -342,8 +398,9 @@ function addExercise(data = null) {
   if (data) {
     block.querySelector('.exercise-select').value = data.exercise_id || '';
     block.querySelector('input[name$="_new_name"]').value = data.new_name || '';
-    syncBwSelect(block);
-    if (data.bw != null) setBw(block, data.bw);
+    syncMode(block);
+    if (data.mode != null) setMode(block, data.mode);
+    else if (data.bw) setMode(block, 'bw');   // lokale Sicherung von vor dem Update
     data.sets.forEach(s => addSet(block, s));
     if (data.sets.length === 0) addSet(block);
     if (isTimerBlock(block)) {   // Warm Up / Cool Down: gespeicherte Zeit ins Timer-Feld
@@ -444,10 +501,12 @@ function readState() {
     entries: [...exercisesEl.children].map(block => ({
       exercise_id: block.querySelector('.exercise-select').value,
       new_name: block.querySelector('input[name$="_new_name"]').value,
-      bw: block.querySelector('.bw-input').value,
+      mode: blockMode(block),
       sets: [...block.querySelectorAll('.sets .set-row')].map(row => ({
         weight_kg: row.querySelector('input[name$="_weight"]').value,
         reps: row.querySelector('input[name$="_reps"]').value,
+        duration_s: row.querySelector('input[name$="_time"]').value,
+        distance_m: row.querySelector('input[name$="_dist"]').value,
       })),
       endurance: Object.fromEntries(
         ENDURANCE_KEYS.map(k => [k, block.querySelector(`input[name$="_${k}"]`).value])
@@ -517,7 +576,7 @@ function markDirty(mode) {
 function applyCreated(created) {
   for (const [n, ex] of Object.entries(created || {})) {
     const option = `<option value="${ex.id}" data-type="${ex.type}"${ex.own ? ' data-own="1"' : ''}` +
-                   `${ex.bw ? ` data-bw="${ex.bw}"` : ''}></option>`;
+                   `${ex.bw ? ` data-bw="${ex.bw}"` : ''}${ex.timed ? ' data-timed="1"' : ''}></option>`;
     const selects = [...document.querySelectorAll('.exercise-select'),
                      document.getElementById('exercise-template').content.querySelector('select')];
     selects.forEach(sel => {
@@ -893,22 +952,22 @@ exercisesEl.addEventListener('input', (ev) => {
 document.getElementById('add-exercise').addEventListener('click', () => addExercise());
 
 exercisesEl.addEventListener('change', (ev) =>{
-    if (ev.target.matches('.bw-check')) {
+    if (ev.target.matches('.mode-toggle input')) {
     // An der Übung merken -> gilt auch für weitere Blöcke und das nächste Workout
     const block = ev.target.closest('.exercise-block');
-    const on = ev.target.checked;
-    block.querySelector('.bw-input').value = on ? '1' : '';   // wird beim Autosave mitgeschickt
+    const mode = blockMode(block);
     const id = block.querySelector('.exercise-select').value;
     const tpl = document.getElementById('exercise-template').content;
     if (id) [...document.querySelectorAll(`.exercise-select option[value="${id}"]`),
              ...tpl.querySelectorAll(`option[value="${id}"]`)].forEach(o => {
-      if (on) o.dataset.bw = o.dataset.bw || '1'; else delete o.dataset.bw;
+      if (mode === 'bw') o.dataset.bw = o.dataset.bw || '1'; else delete o.dataset.bw;
+      if (mode === 'time') o.dataset.timed = '1'; else delete o.dataset.timed;
     });
     applyLast(block);
   }
     if (ev.target.matches('.exercise-select')) {
     const block = ev.target.closest('.exercise-block');
-    syncBwSelect(block);
+    syncMode(block);
     applyFields(block);
     applyLast(block, true);
     syncNewNameFields();

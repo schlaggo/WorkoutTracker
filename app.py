@@ -109,22 +109,32 @@ def parse_duration(text):
 def collect_exercise_blocks(form):
     """Liest alle Übungsblöcke aus dem Formular.
 
-    Feldnamen: ex_<n>_id, ex_<n>_new_name, ex_<n>_set_<m>_weight, ex_<n>_set_<m>_reps,
+    Feldnamen: ex_<n>_id, ex_<n>_new_name, ex_<n>_mode, ex_<n>_set_<m>_weight, ex_<n>_set_<m>_reps,
+    ex_<n>_set_<m>_time, ex_<n>_set_<m>_dist (Meter),
     ex_<n>_distance_km usw. <n> = Nummer der Übung, <m> = Nummer des Satzes.
     """
     keys = list(form.keys())
     indices = sorted({int(m.group(1)) for k in keys if (m := re.match(r"ex_(\d+)_id$", k))})
     blocks = []
     for n in indices:
-        set_nums = sorted({int(m.group(1)) for k in keys if (m := re.match(rf"ex_{n}_set_(\d+)_reps$", k))})
+        # Satznummern: aus Wdh.- ODER Zeit-Feldern (bei Zeitübungen ist das Wdh.-Feld deaktiviert)
+        set_nums = sorted({int(m.group(1)) for k in keys if (m := re.match(rf"ex_{n}_set_(\d+)_(reps|time)$", k))})
+        mode = form.get(f"ex_{n}_mode")   # '' = Gewicht, 'bw' = Körpergewicht, 'time' = Zeit, None = Feld fehlt
+        if mode is None and form.get(f"ex_{n}_bw") is not None:   # Seite von vor dem Update
+            mode = "bw" if form.get(f"ex_{n}_bw") == "1" else ""
         blocks.append({
             "n": n,
             "exercise_id": form.get(f"ex_{n}_id") or None,
             "new_name": form.get(f"ex_{n}_new_name", "").strip(),
-            "sets": [(form.get(f"ex_{n}_set_{m}_weight"), form.get(f"ex_{n}_set_{m}_reps")) for m in set_nums],
+            "sets": [{
+                "weight": form.get(f"ex_{n}_set_{m}_weight"),
+                "reps": form.get(f"ex_{n}_set_{m}_reps"),
+                "time": form.get(f"ex_{n}_set_{m}_time"),
+                "dist": form.get(f"ex_{n}_set_{m}_dist"),   # Meter
+            } for m in set_nums],
             "endurance": {key: form.get(f"ex_{n}_{key}") for key in ENDURANCE_KEYS},
             "timer": form.get(f"ex_{n}_timer_s", "").strip(),
-            "bw": form.get(f"ex_{n}_bw"),   # Körpergewichts-Faktor ('' = mit Gewicht, None = Feld fehlt)
+            "mode": mode,
         })
     return blocks
 
@@ -135,7 +145,7 @@ def collect_exercise_blocks(form):
 # workouts -> workout_entries -> exercises + entry_metrics -> metric_definitions
 WORKOUT_SELECT = (
     "id, date, start_time, end_time, notes, status, created_at, workout_type_id, workout_types(key, label), "
-    "workout_entries(id, order_index, exercise_id, exercises(name, is_timer, bw_factor),"
+    "workout_entries(id, order_index, exercise_id, exercises(name, is_timer, bw_factor, is_timed),"
     "entry_metrics(set_number, value, metric_definitions(key)))"
 )
 
@@ -186,6 +196,7 @@ def build_workout(raw):
             "name": ex.get("name", "?"),
             "is_timer": bool(ex.get("is_timer")),
             "bw_factor": float(ex["bw_factor"]) if ex.get("bw_factor") else None,
+            "is_timed": bool(ex.get("is_timed")),   # Zeitübung (Row, Sled, Plank …)
             "sets": [sets[n] for n in sorted(sets)],
             "endurance": endurance,
         })
@@ -200,13 +211,16 @@ def build_workout(raw):
                 if bw:
                     st["load_kg"] = round(bw * e["bw_factor"] + st.get("weight_kg", 0), 1)
 
-    summary = {"sets": 0, "reps": 0, "volume": 0, "distance_km": 0, "duration_s": 0}
+    summary = {"sets": 0, "reps": 0, "volume": 0, "distance_km": 0, "duration_s": 0,
+               "set_time_s": 0, "set_distance_km": 0}   # set_* = Summe der Zeitübungen
     for e in entries:
         if e["is_timer"]:
             continue
         for st in e["sets"]:
             summary["sets"] += 1
             summary["reps"] += st.get("reps", 0)
+            summary["set_time_s"] += st.get("duration_s", 0)
+            summary["set_distance_km"] += st.get("distance_km", 0)
             load = st.get("load_kg", st.get("weight_kg"))   # Körpergewicht oder Hantelgewicht
             if load is not None and "reps" in st:
                 summary["volume"] += load * st["reps"]
@@ -495,7 +509,7 @@ def profile():
 # ------------------------------------------------------------
 def load_exercises(client, include_archived=False):
     """Übungen fürs Dropdown. Gelöschte (archived) nur, wenn ausdrücklich gewünscht."""
-    q = client.table("exercises").select("id, name, workout_type_id, archived, is_timer, created_by, bw_factor")
+    q = client.table("exercises").select("id, name, workout_type_id, archived, is_timer, created_by, bw_factor, is_timed")
     if not include_archived:
         q = q.eq("archived", False)
     return q.order("name").execute().data
@@ -547,18 +561,29 @@ def parse_workout_form(form, is_strength):
             if not b["exercise_id"] and not b["new_name"]:
                 continue  # leerer Übungsblock -> ignorieren
             metrics = []  # Liste von (metrik_key, satz_nummer, wert)
-            # Schalter "Körpergewicht": '1' = an, '' = aus, None = Feld fehlt (alte Seite)
-            b = {**b, "bw_on": b["bw"] == "1", "bw_given": b["bw"] is not None}
+            # Erfassungsart: '' = Gewicht, 'bw' = Körpergewicht, 'time' = Zeit, None = Feld fehlt (alte Seite)
+            b = {**b, "bw_on": b["mode"] == "bw", "timed": b["mode"] == "time", "mode_given": b["mode"] is not None}
             if b["timer"]:
                 metrics.append(("duration_s", None, parse_duration(b["timer"])))
             elif is_strength:
                 set_no = 0
-                for weight, reps in b["sets"]:
-                    weight, reps = to_float(weight), to_float(reps)
-                    if reps is None:
-                        continue  # Satz ohne Wiederholungen -> leere Zeile
-                    set_no += 1
-                    metrics.append(("reps", set_no, reps))
+                for st in b["sets"]:
+                    weight = to_float(st["weight"])
+                    if b["timed"]:   # Zeitübung: Zeit (Pflicht), Distanz in m + Gewicht optional
+                        seconds = parse_duration(st["time"]) if (st["time"] or "").strip() else None
+                        if seconds is None:
+                            continue  # Satz ohne Zeit -> leere Zeile
+                        dist_m = to_float(st["dist"])
+                        set_no += 1
+                        metrics.append(("duration_s", set_no, seconds))
+                        if dist_m is not None:
+                            metrics.append(("distance_km", set_no, dist_m / 1000))
+                    else:
+                        reps = to_float(st["reps"])
+                        if reps is None:
+                            continue  # Satz ohne Wiederholungen -> leere Zeile
+                        set_no += 1
+                        metrics.append(("reps", set_no, reps))
                     if weight is not None:  # ohne Gewicht = Körpergewichtsübung
                         metrics.append(("weight_kg", set_no, weight))
             else:
@@ -601,10 +626,14 @@ def save_workout_form(client, workout_id, form):
                 known = load_exercises(client, include_archived=True)
             row = next((x for x in known if x["id"] == e["exercise_id"]), None)
             if row and row.get("created_by") == session["user_id"] and not row.get("is_timer") \
-                    and e["bw_given"] and bool(row.get("bw_factor")) != e["bw_on"]:
-                factor = guess_bw_factor(row["name"]) if e["bw_on"] else None
-                client.table("exercises").update({"bw_factor": factor}).eq("id", row["id"]).execute()
-                row["bw_factor"] = factor
+                    and e["mode_given"] and (bool(row.get("bw_factor")) != e["bw_on"]
+                                             or bool(row.get("is_timed")) != e["timed"]):
+                change = {
+                    "bw_factor": (row.get("bw_factor") or guess_bw_factor(row["name"])) if e["bw_on"] else None,
+                    "is_timed": e["timed"],
+                }
+                client.table("exercises").update(change).eq("id", row["id"]).execute()
+                row.update(change)
         exercise_id = e["exercise_id"]
         if not exercise_id:  # neuer Name eingetippt
             if known is None:
@@ -620,6 +649,7 @@ def save_workout_form(client, workout_id, form):
                     "is_custom": True,
                     "created_by": session["user_id"],
                     "bw_factor": guess_bw_factor(e["new_name"]) if is_strength and e["bw_on"] else None,
+                    "is_timed": is_strength and e["timed"],
                 }).execute().data[0]
                 known.append(row)
             exercise_id = row["id"]
@@ -627,6 +657,7 @@ def save_workout_form(client, workout_id, form):
                 "id": exercise_id, "name": row["name"], "type": workout_type,
                 "own": row.get("created_by") == session["user_id"],
                 "bw": row.get("bw_factor"),
+                "timed": bool(row.get("is_timed")),
             }
         payload_entries.append({
             "exercise_id": exercise_id,
@@ -657,7 +688,8 @@ def form_state(w):
         "start_time": w["start_time"] or "",
         "notes": w["notes"] or "",
         "entries": [
-            {"exercise_id": e["exercise_id"], "new_name": "", "bw": e["bw_factor"],
+            {"exercise_id": e["exercise_id"], "new_name": "",
+             "mode": "time" if e["is_timed"] else "bw" if e["bw_factor"] else "",
              "sets": [{k: v for k, v in st.items() if k != "load_kg"} for st in e["sets"]],
              "endurance": e["endurance"]}
             for e in w["entries"]
@@ -692,6 +724,16 @@ def set_progress(now, last):
     """
     reps, last_reps = now.get("reps"), last.get("reps")
     weight, last_weight = now.get("weight_kg"), last.get("weight_kg")
+    sec, last_sec = now.get("duration_s"), last.get("duration_s")
+    if sec and last_sec and not reps:   # Zeitübung
+        dist, last_dist = now.get("distance_km"), last.get("distance_km")
+        if weight != last_weight or dist != last_dist:
+            return None   # nur bei gleicher Distanz + gleichem Gewicht vergleichbar
+        if dist and sec < last_sec:      # gleiche Strecke schneller
+            return f"{format_duration(last_sec - sec)} schneller"
+        if not dist and sec > last_sec:  # z.B. Plank: länger gehalten
+            return f"{format_duration(sec - last_sec)} länger"
+        return None
     if not reps:
         return None
     if weight is not None and ((last_weight is None and weight > 0)
@@ -1182,7 +1224,7 @@ def exercise_trends(workouts, today):
         if not period:
             continue
         for e in w["entries"]:
-            if e["is_timer"]:
+            if e["is_timer"] or e["is_timed"]:
                 continue
             d = data.setdefault(e["name"], {
                 "name": e["name"], "last": w["date"], "kind": "strength" if e["sets"] else "endurance",

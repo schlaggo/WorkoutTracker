@@ -26,10 +26,18 @@
     <div class="kpi"><span class="muted">Übungen</span><b>{{ exercise_count }}</b></div>
     {% if strength %}
       <div class="kpi"><span class="muted">Sätze</span><b>{{ w.summary.sets }}</b></div>
+      {% if w.summary.reps %}
       <div class="kpi"><span class="muted">Wiederholungen</span><b>{{ w.summary.reps|num(0) }}</b></div>
+      {% endif %}
     {% endif %}
     {% if w.summary.volume %}
       <div class="kpi"><span class="muted">Volumen</span><b>{{ w.summary.volume|num(0) }} kg</b></div>
+    {% endif %}
+    {% if w.summary.set_time_s %}
+      <div class="kpi"><span class="muted">Zeit (Zeitübungen)</span><b>{{ w.summary.set_time_s|duration }}</b></div>
+    {% endif %}
+    {% if w.summary.set_distance_km %}
+      <div class="kpi"><span class="muted">Distanz (Zeitübungen)</span><b>{{ (w.summary.set_distance_km * 1000)|num(0) }} m</b></div>
     {% endif %}
     {% if w.summary.distance_km %}
       <div class="kpi"><span class="muted">Distanz</span><b>{{ w.summary.distance_km|num(2) }} km</b></div>

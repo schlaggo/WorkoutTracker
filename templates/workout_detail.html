@@ -25,8 +25,22 @@
   <div class="card">
     <h2>{{ e.name }}</h2>
 
+    {# Zeitübung (Row, Sled, Plank …): Zeit, Distanz, Gewicht pro Satz #}
+    {% if e.sets and e.is_timed %}
+      <table class="sets-table">
+        <tr><th>Satz</th><th>Zeit</th><th>Distanz</th><th>Gewicht</th></tr>
+        {% for s in e.sets %}
+          <tr>
+            <td>{{ loop.index }}</td>
+            <td>{{ s.duration_s|duration if s.duration_s is defined else '–' }}</td>
+            <td>{{ ((s.distance_km * 1000)|num(0) ~ ' m') if s.distance_km is defined else '–' }}</td>
+            <td>{{ (s.weight_kg|num ~ ' kg') if s.weight_kg is defined else '–' }}</td>
+          </tr>
+        {% endfor %}
+      </table>
+
     {# Kraft: Tabelle mit allen Sätzen #}
-    {% if e.sets %}
+    {% elif e.sets %}
       <table class="sets-table">
         <tr><th>Satz</th><th>Gewicht</th><th>Wdh.</th></tr>
         {% for s in e.sets %}
