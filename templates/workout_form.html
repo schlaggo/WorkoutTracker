@@ -141,12 +141,12 @@
 {# ---------- Vorlage für EINEN Satz. __M__ = Satznummer ---------- #}
 <template id="set-template">
   <div class="set-row">
-    <div>
-      <label>Satz __M__ — <span class="weight-label">Gewicht (kg)</span></label>
+    <div class="weight-col">
+      <label>Satz __M__ — Gewicht (kg)</label>
       <input type="text" inputmode="decimal" name="ex___N___set___M___weight">
     </div>
     <div>
-      <label>Wiederholungen</label>
+      <label><span class="bw-set-no">Satz __M__ — </span>Wiederholungen</label>
       <input type="text" inputmode="numeric" name="ex___N___set___M___reps">
     </div>
     <p class="set-praise" hidden></p>
@@ -226,9 +226,14 @@ function lastFor(block) {
 }
 function setRowPlaceholder(block, row, i) {
   const s = ((lastFor(block) || {}).sets || [])[i] || {};
+  // Körpergewicht: Gewichtsfeld ausblenden + deaktivieren (wird dann nicht gespeichert),
+  // Wiederholungen nehmen die ganze Breite ein
   const bw = isBwBlock(block);
-  row.querySelector('.weight-label').textContent = bw ? 'Zusatz (kg)' : 'Gewicht (kg)';
-  row.querySelector('input[name$="_weight"]').placeholder = s.weight_kg != null ? fmtNum(s.weight_kg) : (bw ? 'optional' : '');
+  const weightInput = row.querySelector('input[name$="_weight"]');
+  row.classList.toggle('bw-row', bw);
+  weightInput.disabled = bw;
+  if (bw) weightInput.value = '';
+  weightInput.placeholder = s.weight_kg != null ? fmtNum(s.weight_kg) : '';
   row.querySelector('input[name$="_reps"]').placeholder = s.reps != null ? fmtNum(s.reps) : '';
   setPraise(block, row, i);
 }
@@ -286,9 +291,8 @@ function applyLast(block, fillRows = false) {
   let text;
   if (last.sets.length) {
     // \u00a0 = geschütztes Leerzeichen: "60 kg × 10" bricht nie mitten drin um
-    const plus = isBwBlock(block) ? '+' : '';
-    text = last.sets.map(s => s.weight_kg != null
-      ? `${plus}${fmtNum(s.weight_kg)}\u00a0kg\u00a0×\u00a0${fmtNum(s.reps ?? '–')}`
+    text = last.sets.map(s => s.weight_kg != null && !isBwBlock(block)
+      ? `${fmtNum(s.weight_kg)}\u00a0kg\u00a0×\u00a0${fmtNum(s.reps ?? '–')}`
       : `${fmtNum(s.reps)}\u00a0Wdh.`).join(' · ');
   } else {
     text = [
