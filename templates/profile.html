@@ -2,11 +2,18 @@
 {% block title %}Profil{% endblock %}
 {% block content %}
 
-<a class="back-link" href="{{ url_for('dashboard') }}">‹ Übersicht</a>
+{% if welcome %}
+<div class="page-head">
+  <h1>Fast fertig</h1>
+</div>
+<p class="muted welcome-text">Trage dein Körpergewicht ein</p>
+{% else %}
+<a class="back-link" href="{{ url_for('dashboard') }}">Übersicht</a>
 
 <div class="page-head">
   <h1>Profil</h1>
 </div>
+{% endif %}
 
 <div class="card">
   <form method="post">
@@ -18,7 +25,7 @@
 
     <label for="bodyweight_kg">Körpergewicht (kg)</label>
     <input type="text" inputmode="decimal" name="bodyweight_kg" id="bodyweight_kg"
-           value="{{ weight }}" placeholder="z.B. 78,5">
+           value="{{ weight }}" placeholder="z.B. 78,5" {% if welcome %} required{% endif %}>
     {% if weight_date %}
       <p class="muted profile-hint">Zuletzt eingetragen: {{ weight_date }}</p>
     {% else %}
@@ -33,7 +40,7 @@
     <input type="date" name="birth_date" id="birth_date" value="{{ prof.birth_date or '' }}">
     {% if age %}<p class="muted profile-hint">{{ age }} Jahre</p>{% endif %}
 
-    <button type="submit" style="display:block;width:100%;">Speichern</button>
+    <button type="submit" style="display:block;width:100%;">{% if welcome %}Weiter{% else %}Speichern{% endif %}</button>
   </form>
 </div>
 <a class="btn logout-btn" href="{{ url_for('logout') }}">Logout</a>

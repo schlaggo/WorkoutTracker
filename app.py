@@ -371,6 +371,7 @@ def age_from(birth):
 @login_required
 def profile():
     client = current_client()
+    welcome = request.args.get("welcome") == "1"
 
     if request.method == "POST":
         display_name = request.form.get("display_name", "").strip()
@@ -389,6 +390,9 @@ def profile():
             weight, errors = None, errors + ["Gewicht bitte als Zahl in kg eingeben."]
         if weight is not None and not 30 <= weight <= 300:
             errors.append("Gewicht bitte zwischen 30 und 300 kg eingeben.")
+        
+        if welcome and weight is None:
+            errors.appen("Bitte dein Körpergewicht eintragen.")
 
         birth = None
         birth_text = request.form.get("birth_date", "").strip()
@@ -404,7 +408,7 @@ def profile():
         if errors:
             for e in errors:
                 flash(e, "error")
-            return redirect(url_for("profile"))
+            return redirect(url_for("profile", welcome=1) if welcome else url_for("profile"))
 
         client.table("profiles").update({
             "display_name": display_name or session.get("email"),
@@ -421,6 +425,13 @@ def profile():
                 "value": weight,
                 "date": local_today().isoformat(),
             }, on_conflict="user_id,metric_definition_id,date").execute()
+
+        if weight is not None:
+            session["has_bodyweight"] = True
+
+        if welcome:
+            flash("Alles eingerichtet - viel Spaß beim Training!", "success")
+            return redirect(url_for("dashboard"))
 
         flash("Profil gespeichert.", "success")
         return redirect(url_for("profile"))
@@ -440,6 +451,7 @@ def profile():
         weight=format_number(weight["value"]) if weight else "",
         weight_date=format_long_date(date.fromisoformat(weight["date"])) if weight else None,
         age=age_from(birth) if birth else None,
+        welcome=welcome,
     )
 
 
@@ -1182,6 +1194,12 @@ def build_hints(workouts, trends, goals, today):
 @login_required
 def dashboard():
     client = current_client()
+    #Noch kein Körpergewicht hinterlegt
+    if not session.get("has_bodyweight"):
+        if latest_bodyweight(client) is None:
+            return redirect(url_for("profile", welcome=1))
+        session["has_bodyweight"] = True
+
     today = local_today()
     workouts = load_all_workouts(client)
 

@@ -92,6 +92,7 @@ main {
 }
 .profile-btn:hover { background: var(--surface-3); }
 .profile-hint { margin: 6px 2px 0; font-size: 13px; }
+.welcome-text { margin: -6px 2px 16px; line-height: 1.5}
 .logout-btn {
   display: block; width: 100%; margin-top: 4px;
   background: transparent; color: var(--danger); border: 1px solid rgba(255, 92, 99, .35);
