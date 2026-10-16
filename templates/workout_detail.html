@@ -32,7 +32,11 @@
         {% for s in e.sets %}
           <tr>
             <td>{{ loop.index }}</td>
-            <td>{{ (s.weight_kg|num ~ ' kg') if s.weight_kg is defined else 'Körpergewicht' }}</td>
+            <td>
+              {%- if s.weight_kg is defined -%}
+                {{ ('KG + ' if e.bw_factor else '') ~ s.weight_kg|num ~ ' kg' }}
+              {%- else -%}Körpergewicht{%- endif -%}
+            </td>
             <td>{{ s.reps|num if s.reps is defined else '–' }}</td>
           </tr>
         {% endfor %}

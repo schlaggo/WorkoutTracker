@@ -74,7 +74,8 @@
           {% for ex in exercises %}
             <option value="{{ ex.id }}" data-type="{{ 'any' if ex.is_timer else ex.workout_type_id }}"
               {%- if ex.is_timer %} data-timer="1"{% endif %}
-              {%- if ex.created_by == session.user_id %} data-own="1"{% endif %}>{{ ex.name }}</option>
+              {%- if ex.created_by == session.user_id %} data-own="1"{% endif %}
+              {%- if ex.bw_factor %} data-bw="{{ ex.bw_factor|float }}"{% endif %}>{{ ex.name }}</option>
           {% endfor %}
         </select>
         <button type="button" class="ex-picker-btn" data-action="toggle-picker">
@@ -85,6 +86,12 @@
     <p class="last-hint" hidden></p>
 
     <div class="strength-fields">
+      {# Körpergewichtsübung? Wird an der Übung gemerkt -> nur einmal einstellen.
+         Wie viel vom Körpergewicht zählt, bestimmt der Server anhand des Übungsnamens. #}
+      <div class="toggle-group bw-toggle">
+        <label><input type="checkbox" class="bw-check"> Körpergewicht</label>
+      </div>
+      <input type="hidden" name="ex___N___bw" class="bw-input">
       <div class="sets"></div>
       <div class="set-buttons">
         <button type="button" class="secondary small" data-action="add-set">+ Satz</button>
@@ -135,7 +142,7 @@
 <template id="set-template">
   <div class="set-row">
     <div>
-      <label>Satz __M__ — Gewicht (kg)</label>
+      <label>Satz __M__ — <span class="weight-label">Gewicht (kg)</span></label>
       <input type="text" inputmode="decimal" name="ex___N___set___M___weight">
     </div>
     <div>
@@ -195,13 +202,33 @@ function fmtNum(v) {
   return typeof v === 'number' ? String(v).replace('.', ',') : v;
 }
 
+// Körpergewichtsübung? (Schalter "Körpergewicht" im Block an)
+function isBwBlock(block) {
+  return block.querySelector('.bw-check').checked;
+}
+
+// Schalter setzen. value = Faktor aus der DB ("1.0", 0.65 …) oder leer
+function setBw(block, value) {
+  const on = parseFloat(value) > 0;
+  block.querySelector('.bw-check').checked = on;
+  block.querySelector('.bw-input').value = on ? '1' : '';
+}
+
+// Belastungsart der gewählten Übung in den Schalter übernehmen
+function syncBwSelect(block) {
+  const opt = block.querySelector('.exercise-select').selectedOptions[0];
+  if (opt && opt.value) setBw(block, opt.dataset.bw);
+}
+
 // Letzte Werte der Übung, die in diesem Block ausgewählt ist (oder null)
 function lastFor(block) {
   return PAGE.last[block.querySelector('.exercise-select').value] || null;
 }
 function setRowPlaceholder(block, row, i) {
   const s = ((lastFor(block) || {}).sets || [])[i] || {};
-  row.querySelector('input[name$="_weight"]').placeholder = s.weight_kg != null ? fmtNum(s.weight_kg) : '';
+  const bw = isBwBlock(block);
+  row.querySelector('.weight-label').textContent = bw ? 'Zusatz (kg)' : 'Gewicht (kg)';
+  row.querySelector('input[name$="_weight"]').placeholder = s.weight_kg != null ? fmtNum(s.weight_kg) : (bw ? 'optional' : '');
   row.querySelector('input[name$="_reps"]').placeholder = s.reps != null ? fmtNum(s.reps) : '';
   setPraise(block, row, i);
 }
@@ -259,8 +286,9 @@ function applyLast(block, fillRows = false) {
   let text;
   if (last.sets.length) {
     // \u00a0 = geschütztes Leerzeichen: "60 kg × 10" bricht nie mitten drin um
+    const plus = isBwBlock(block) ? '+' : '';
     text = last.sets.map(s => s.weight_kg != null
-      ? `${fmtNum(s.weight_kg)}\u00a0kg\u00a0×\u00a0${fmtNum(s.reps ?? '–')}`
+      ? `${plus}${fmtNum(s.weight_kg)}\u00a0kg\u00a0×\u00a0${fmtNum(s.reps ?? '–')}`
       : `${fmtNum(s.reps)}\u00a0Wdh.`).join(' · ');
   } else {
     text = [
@@ -310,6 +338,8 @@ function addExercise(data = null) {
   if (data) {
     block.querySelector('.exercise-select').value = data.exercise_id || '';
     block.querySelector('input[name$="_new_name"]').value = data.new_name || '';
+    syncBwSelect(block);
+    if (data.bw != null) setBw(block, data.bw);
     data.sets.forEach(s => addSet(block, s));
     if (data.sets.length === 0) addSet(block);
     if (isTimerBlock(block)) {   // Warm Up / Cool Down: gespeicherte Zeit ins Timer-Feld
@@ -410,6 +440,7 @@ function readState() {
     entries: [...exercisesEl.children].map(block => ({
       exercise_id: block.querySelector('.exercise-select').value,
       new_name: block.querySelector('input[name$="_new_name"]').value,
+      bw: block.querySelector('.bw-input').value,
       sets: [...block.querySelectorAll('.sets .set-row')].map(row => ({
         weight_kg: row.querySelector('input[name$="_weight"]').value,
         reps: row.querySelector('input[name$="_reps"]').value,
@@ -481,7 +512,8 @@ function markDirty(mode) {
 // Vom Server neu angelegte Übungen ins Formular übernehmen
 function applyCreated(created) {
   for (const [n, ex] of Object.entries(created || {})) {
-    const option = `<option value="${ex.id}" data-type="${ex.type}"${ex.own ? ' data-own="1"' : ''}></option>`;
+    const option = `<option value="${ex.id}" data-type="${ex.type}"${ex.own ? ' data-own="1"' : ''}` +
+                   `${ex.bw ? ` data-bw="${ex.bw}"` : ''}></option>`;
     const selects = [...document.querySelectorAll('.exercise-select'),
                      document.getElementById('exercise-template').content.querySelector('select')];
     selects.forEach(sel => {
@@ -857,8 +889,22 @@ exercisesEl.addEventListener('input', (ev) => {
 document.getElementById('add-exercise').addEventListener('click', () => addExercise());
 
 exercisesEl.addEventListener('change', (ev) =>{
+    if (ev.target.matches('.bw-check')) {
+    // An der Übung merken -> gilt auch für weitere Blöcke und das nächste Workout
+    const block = ev.target.closest('.exercise-block');
+    const on = ev.target.checked;
+    block.querySelector('.bw-input').value = on ? '1' : '';   // wird beim Autosave mitgeschickt
+    const id = block.querySelector('.exercise-select').value;
+    const tpl = document.getElementById('exercise-template').content;
+    if (id) [...document.querySelectorAll(`.exercise-select option[value="${id}"]`),
+             ...tpl.querySelectorAll(`option[value="${id}"]`)].forEach(o => {
+      if (on) o.dataset.bw = o.dataset.bw || '1'; else delete o.dataset.bw;
+    });
+    applyLast(block);
+  }
     if (ev.target.matches('.exercise-select')) {
     const block = ev.target.closest('.exercise-block');
+    syncBwSelect(block);
     applyFields(block);
     applyLast(block, true);
     syncNewNameFields();

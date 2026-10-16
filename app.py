@@ -6,7 +6,7 @@ from zoneinfo import ZoneInfo
 
 
 import jwt
-from flask import Flask, render_template, request, redirect, session, url_for, flash
+from flask import Flask, render_template, request, redirect, session, url_for, flash, g
 from dotenv import load_dotenv
 from supabase import create_client
 
@@ -124,6 +124,7 @@ def collect_exercise_blocks(form):
             "sets": [(form.get(f"ex_{n}_set_{m}_weight"), form.get(f"ex_{n}_set_{m}_reps")) for m in set_nums],
             "endurance": {key: form.get(f"ex_{n}_{key}") for key in ENDURANCE_KEYS},
             "timer": form.get(f"ex_{n}_timer_s", "").strip(),
+            "bw": form.get(f"ex_{n}_bw"),   # Körpergewichts-Faktor ('' = mit Gewicht, None = Feld fehlt)
         })
     return blocks
 
@@ -134,7 +135,7 @@ def collect_exercise_blocks(form):
 # workouts -> workout_entries -> exercises + entry_metrics -> metric_definitions
 WORKOUT_SELECT = (
     "id, date, start_time, end_time, notes, status, created_at, workout_type_id, workout_types(key, label), "
-    "workout_entries(id, order_index, exercise_id, exercises(name, is_timer),"
+    "workout_entries(id, order_index, exercise_id, exercises(name, is_timer, bw_factor),"
     "entry_metrics(set_number, value, metric_definitions(key)))"
 )
 
@@ -143,6 +144,24 @@ def clean_number(v):
     """62.0 -> 62, 62.5 -> 62.5 (für schöne Anzeige)"""
     f = float(v)
     return int(f) if f.is_integer() else f
+
+
+def bodyweight_on(d):
+    """Körpergewicht am Tag d: letzter Eintrag am oder vor d.
+    Gibt es davor keinen (Gewicht erst später eingetragen) -> ältester Eintrag. Sonst None.
+    Wird pro Seitenaufruf nur einmal aus der DB geladen (flask.g)."""
+    if "bodyweights" not in g:
+        client = current_client()
+        mid = metric_id(client, "bodyweight_kg") if client else None
+        rows = [] if mid is None else (
+            client.table("measurements").select("value, date")
+            .eq("metric_definition_id", mid).order("date").execute().data
+        )
+        g.bodyweights = [(date.fromisoformat(r["date"]), float(r["value"])) for r in rows]
+    before = [v for day, v in g.bodyweights if day <= d]
+    if before:
+        return before[-1]
+    return g.bodyweights[0][1] if g.bodyweights else None
 
 
 def build_workout(raw):
@@ -161,13 +180,25 @@ def build_workout(raw):
                 endurance[key] = value
             else:
                 sets.setdefault(m["set_number"], {})[key] = value
+        ex = e.get("exercises") or {}
         entries.append({
             "exercise_id":e["exercise_id"],
-            "name": (e.get("exercises") or {}).get("name", "?"),
-            "is_timer": bool((e.get("exercises") or {}).get("is_timer")),
+            "name": ex.get("name", "?"),
+            "is_timer": bool(ex.get("is_timer")),
+            "bw_factor": float(ex["bw_factor"]) if ex.get("bw_factor") else None,
             "sets": [sets[n] for n in sorted(sets)],
             "endurance": endurance,
         })
+
+    workout_date = date.fromisoformat(raw["date"])
+
+    # Körpergewichtsübungen: bewegte Last = Körpergewicht x Faktor + Zusatzgewicht
+    for e in entries:
+        if e["bw_factor"] and e["sets"]:
+            bw = bodyweight_on(workout_date)
+            for st in e["sets"]:
+                if bw:
+                    st["load_kg"] = round(bw * e["bw_factor"] + st.get("weight_kg", 0), 1)
 
     summary = {"sets": 0, "reps": 0, "volume": 0, "distance_km": 0, "duration_s": 0}
     for e in entries:
@@ -176,8 +207,9 @@ def build_workout(raw):
         for st in e["sets"]:
             summary["sets"] += 1
             summary["reps"] += st.get("reps", 0)
-            if "weight_kg" in st and "reps" in st:
-                summary["volume"] += st["weight_kg"] * st["reps"]
+            load = st.get("load_kg", st.get("weight_kg"))   # Körpergewicht oder Hantelgewicht
+            if load is not None and "reps" in st:
+                summary["volume"] += load * st["reps"]
         summary["distance_km"] += e["endurance"].get("distance_km", 0)
         summary["duration_s"] += e["endurance"].get("duration_s", 0)
 
@@ -185,7 +217,7 @@ def build_workout(raw):
     return {
         "id": raw["id"],
         "type_id": raw["workout_type_id"],
-        "date": date.fromisoformat(raw["date"]),
+        "date": workout_date,
         "start_time": (raw.get("start_time") or "")[:5] or None,
         "notes": raw.get("notes"),
         "status": raw.get("status") or "finished",   # 'active' = läuft gerade
@@ -463,7 +495,7 @@ def profile():
 # ------------------------------------------------------------
 def load_exercises(client, include_archived=False):
     """Übungen fürs Dropdown. Gelöschte (archived) nur, wenn ausdrücklich gewünscht."""
-    q = client.table("exercises").select("id, name, workout_type_id, archived, is_timer, created_by")
+    q = client.table("exercises").select("id, name, workout_type_id, archived, is_timer, created_by, bw_factor")
     if not include_archived:
         q = q.eq("archived", False)
     return q.order("name").execute().data
@@ -471,6 +503,22 @@ def load_exercises(client, include_archived=False):
 def normalize_name(name):
     """' Weighted  pull ups ' -> 'weighted pull ups' (zum Vergleichen von Übungsnamen)"""
     return " ".join((name or "").split()).lower()
+
+
+# Wie viel vom Körpergewicht wird bei einer Übung bewegt? Grobe Richtwerte nach Übungsname.
+# Erster Treffer gewinnt (darum "knie-liegestütz" vor "liegestütz"). Unbekannt = 100 %.
+BW_FACTORS = [
+    (("knieliegest", "knie-liegest", "knie liegest", "knee push"), 0.5),
+    (("liegest", "push-up", "pushup", "push up"), 0.65),
+    (("rudern", "inverted", "australian"), 0.5),
+    (("sit-up", "situp", "sit up", "crunch"), 0.3),
+    (("kniebeuge", "squat", "ausfallschritt", "lunge", "step-up", "step up"), 0.7),
+]
+
+
+def guess_bw_factor(name):
+    n = normalize_name(name)
+    return next((f for words, f in BW_FACTORS if any(w in n for w in words)), 1.0)
 
 
 def find_exercise(exercises, name, workout_type):
@@ -499,6 +547,8 @@ def parse_workout_form(form, is_strength):
             if not b["exercise_id"] and not b["new_name"]:
                 continue  # leerer Übungsblock -> ignorieren
             metrics = []  # Liste von (metrik_key, satz_nummer, wert)
+            # Schalter "Körpergewicht": '1' = an, '' = aus, None = Feld fehlt (alte Seite)
+            b = {**b, "bw_on": b["bw"] == "1", "bw_given": b["bw"] is not None}
             if b["timer"]:
                 metrics.append(("duration_s", None, parse_duration(b["timer"])))
             elif is_strength:
@@ -542,8 +592,19 @@ def save_workout_form(client, workout_id, form):
 
     created = {}
     payload_entries = []
-    known = None  # vorhandene Übungen, nur laden wenn wirklich ein neuer Name eingetippt wurde
+    known = None  # vorhandene Übungen, nur laden wenn nötig
+    is_strength = workout_type == 1
     for e in entries:
+        # Krafttraining: geänderte Belastungsart (Gewicht / Körpergewicht) an der eigenen Übung merken
+        if is_strength and e["exercise_id"]:
+            if known is None:
+                known = load_exercises(client, include_archived=True)
+            row = next((x for x in known if x["id"] == e["exercise_id"]), None)
+            if row and row.get("created_by") == session["user_id"] and not row.get("is_timer") \
+                    and e["bw_given"] and bool(row.get("bw_factor")) != e["bw_on"]:
+                factor = guess_bw_factor(row["name"]) if e["bw_on"] else None
+                client.table("exercises").update({"bw_factor": factor}).eq("id", row["id"]).execute()
+                row["bw_factor"] = factor
         exercise_id = e["exercise_id"]
         if not exercise_id:  # neuer Name eingetippt
             if known is None:
@@ -558,12 +619,14 @@ def save_workout_form(client, workout_id, form):
                     "name": " ".join(e["new_name"].split()),  # doppelte Leerzeichen raus
                     "is_custom": True,
                     "created_by": session["user_id"],
+                    "bw_factor": guess_bw_factor(e["new_name"]) if is_strength and e["bw_on"] else None,
                 }).execute().data[0]
                 known.append(row)
             exercise_id = row["id"]
             created[str(e["n"])] = {
                 "id": exercise_id, "name": row["name"], "type": workout_type,
                 "own": row.get("created_by") == session["user_id"],
+                "bw": row.get("bw_factor"),
             }
         payload_entries.append({
             "exercise_id": exercise_id,
@@ -594,7 +657,9 @@ def form_state(w):
         "start_time": w["start_time"] or "",
         "notes": w["notes"] or "",
         "entries": [
-            {"exercise_id": e["exercise_id"], "new_name": "", "sets": e["sets"], "endurance": e["endurance"]}
+            {"exercise_id": e["exercise_id"], "new_name": "", "bw": e["bw_factor"],
+             "sets": [{k: v for k, v in st.items() if k != "load_kg"} for st in e["sets"]],
+             "endurance": e["endurance"]}
             for e in w["entries"]
         ],
     }
@@ -1127,7 +1192,7 @@ def exercise_trends(workouts, today):
             if e["sets"]:
                 has_weight = any("weight_kg" in s for s in e["sets"])
                 for s in e["sets"]:
-                    value = e1rm(s.get("weight_kg"), s.get("reps")) if has_weight else s.get("reps")
+                    value = e1rm(s.get("load_kg", s.get("weight_kg")), s.get("reps")) if has_weight else s.get("reps")
                     if value:
                         d[period].append(value)
                 d["unit"] = "kg (e1RM)" if has_weight else "Wdh."
