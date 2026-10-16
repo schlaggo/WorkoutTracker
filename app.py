@@ -344,6 +344,107 @@ def logout():
     return redirect(url_for("login"))
 
 # ------------------------------------------------------------
+# Profil: persönliche Daten (Name, Größe, Geburtsdatum, Körpergewicht)
+# Größe + Geburtsdatum in profiles, Körpergewicht als Messwert in measurements
+# (Verlauf bleibt erhalten -> später Volumen von Körpergewichtsübungen je Datum)
+# ------------------------------------------------------------
+def metric_id(client, key):
+    rows = client.table("metric_definitions").select("id").eq("key", key).execute().data
+    return rows[0]["id"] if rows else None
+
+def latest_bodyweight(client):
+    mid = metric_id(client, "bodyweight_kg")
+    if mid is None:
+        return None
+    rows = (
+        client.table("measurements").select("value, date")
+        .eq("metric_definition_id", mid)
+        .order("date", desc=True).limit(1).execute().data
+    )
+    return rows[0] if rows else None
+
+def age_from(birth):
+    today = local_today()
+    return today.year - birth.year - ((today.month, today.day) < (birth.month, birth.day))
+
+@app.route("/profile", methods=["GET", "POST"])
+@login_required
+def profile():
+    client = current_client()
+
+    if request.method == "POST":
+        display_name = request.form.get("display_name", "").strip()
+        errors = []
+
+        try:
+            height = to_float(request.form.get("height_cm"))
+        except ValueError:
+            height, errors = None, errors + ["Größe bitte als Zahl in cm eingeben."]
+        if height is not None and not 100 <= height <= 250:
+            errors.append("Größe bitte zwischen 100 und 250 cm eingeben.")
+
+        try:
+            weight = to_float(request.form.get("bodyweight_kg"))
+        except ValueError:
+            weight, errors = None, errors + ["Gewicht bitte als Zahl in kg eingeben."]
+        if weight is not None and not 30 <= weight <= 300:
+            errors.append("Gewicht bitte zwischen 30 und 300 kg eingeben.")
+
+        birth = None
+        birth_text = request.form.get("birth_date", "").strip()
+        if birth_text:
+            try:
+                birth = date.fromisoformat(birth_text)
+            except ValueError:
+                errors.append("Geburtsdatum ungültig.")
+            else:
+                if not 10 <= age_from(birth) <= 100:
+                    errors.append("Geburtsdatum bitte prüfen.")
+
+        if errors:
+            for e in errors:
+                flash(e, "error")
+            return redirect(url_for("profile"))
+
+        client.table("profiles").update({
+            "display_name": display_name or session.get("email"),
+            "height_cm": height,
+            "birth_date": birth.isoformat() if birth else None,
+        }).eq("id", session["user_id"]).execute()
+
+        # Gewicht nur speichern, wenn es sich geändert hat; pro Tag ein Wert (überschreibt)
+        last = latest_bodyweight(client)
+        if weight is not None and (last is None or float(last["value"]) != weight):
+            client.table("measurements").upsert({
+                "user_id": session["user_id"],
+                "metric_definition_id": metric_id(client, "bodyweight_kg"),
+                "value": weight,
+                "date": local_today().isoformat(),
+            }, on_conflict="user_id,metric_definition_id,date").execute()
+
+        flash("Profil gespeichert.", "success")
+        return redirect(url_for("profile"))
+
+    rows = (
+        client.table("profiles").select("display_name, height_cm, birth_date")
+        .eq("id", session["user_id"]).execute().data
+    )
+    prof = rows[0] if rows else {}
+    weight = latest_bodyweight(client)
+    birth = date.fromisoformat(prof["birth_date"]) if prof.get("birth_date") else None
+    return render_template(
+        "profile.html",
+        prof=prof,
+        email=session.get("email"),
+        height=format_number(prof.get("height_cm"), 0) if prof.get("height_cm") is not None else "",
+        weight=format_number(weight["value"]) if weight else "",
+        weight_date=format_long_date(date.fromisoformat(weight["date"])) if weight else None,
+        age=age_from(birth) if birth else None,
+    )
+
+
+
+# ------------------------------------------------------------
 # Workout starten / live erfassen / beenden / bearbeiten
 # Ablauf: Start Workout -> Workout wird SOFORT in der DB angelegt (status 'active')
 # -> jede Eingabe wird automatisch gespeichert (autosave) -> End Workout (status 'finished')
