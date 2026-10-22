@@ -296,12 +296,15 @@ function setPraise(block, row, i) {
     if (text) el.textContent = `💪 Stark! ${text}`;
     return;
   }
-  if (last && reps) {
-    const lw = last.weight_kg ?? null, lr = last.reps ?? null;
-    if (weight != null && ((lw == null && weight > 0) || (lw != null && weight > lw))) {
-      text = `+${fmtNum(+(weight - (lw || 0)).toFixed(2))} kg`;
-    } else if (weight === lw && lr != null && reps > lr) {
+// Gleiche Regeln wie set_progress() am Server
+  if (last && reps && last.reps != null) {
+    const w = weight || 0, lw = last.weight_kg || 0, lr = last.reps;
+    if (w > lw && reps >= lr) {
+      text = `+${fmtNum(+(w - lw).toFixed(2))} kg` + (reps > lr ? `, +${fmtNum(reps - lr)} Wdh.` : '');
+    } else if (w === lw && reps > lr) {
       text = `+${fmtNum(reps - lr)} Wdh.`;
+    } else if (weight && last.weight_kg && weight * reps > last.weight_kg * lr) {
+      text = `+${fmtNum(+(weight * reps - last.weight_kg * lr).toFixed(1))} kg Volumen`;
     }
   }
   el.hidden = !text;

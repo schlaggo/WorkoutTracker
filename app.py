@@ -716,11 +716,19 @@ def last_values(workouts, current):
 
 # ------------------------------------------------------------
 # Fortschritt & Abschluss-Statistik
-# ------------------------------------------------------------
+# -----------------------------------------------------------
+def set_load(s):
+    """Bewegte Last eines Satzes: Körpergewicht-Last (load_kg) oder Hantelgewicht, sonst None."""
+    return s.get("load_kg", s.get("weight_kg"))
+
+
 def set_progress(now, last):
     """Vergleicht einen Satz mit dem gleichen Satz vom letzten Mal.
-    Mehr Gewicht (mit Wiederholungen) oder gleiches Gewicht mit mehr Wdh. = Fortschritt.
-    Rückgabe: '+2,5 kg' / '+2 Wdh.' oder None.
+    Fortschritt =
+      - mehr Gewicht bei mindestens gleich vielen Wdh.   -> '+2,5 kg' (ggf. '+2,5 kg, +1 Wdh.')
+      - gleiches Gewicht, mehr Wdh.                       -> '+2 Wdh.'
+      - sonst mehr Satz-Volumen (Gewicht x Wdh.)          -> '+40 kg Volumen'
+    Mehr Gewicht mit deutlich weniger Wdh. (65 x 3 statt 60 x 10) ist KEIN Fortschritt.
     """
     reps, last_reps = now.get("reps"), last.get("reps")
     weight, last_weight = now.get("weight_kg"), last.get("weight_kg")
@@ -734,23 +742,37 @@ def set_progress(now, last):
         if not dist and sec > last_sec:  # z.B. Plank: länger gehalten
             return f"{format_duration(sec - last_sec)} länger"
         return None
-    if not reps:
+    if not reps or last_reps is None:
         return None
-    if weight is not None and ((last_weight is None and weight > 0)
-                               or (last_weight is not None and weight > last_weight)):
-        return f"+{format_number(weight - (last_weight or 0))} kg"
-    if weight == last_weight and last_reps is not None and reps > last_reps:
+    w, lw = weight or 0, last_weight or 0
+    if w > lw and reps >= last_reps:
+        text = f"+{format_number(w - lw)} kg"
+        return text + (f", +{format_number(reps - last_reps, 0)} Wdh." if reps > last_reps else "")
+    if w == lw and reps > last_reps:
         return f"+{format_number(reps - last_reps, 0)} Wdh."
+    load, last_load = set_load(now), set_load(last)
+    if load and last_load and load * reps > last_load * last_reps:
+        return f"+{format_number(load * reps - last_load * last_reps)} kg Volumen"
     return None
 
+
+def exercise_volume(sets):
+    """Gesamtvolumen einer Übung (Summe Last x Wdh.) oder None, wenn es keine Last gibt."""
+    vols = [set_load(s) * s["reps"] for s in sets if set_load(s) and s.get("reps")]
+    return sum(vols) if vols else None
+
+
 def workout_progress(w, last):
-    """Fortschritte pro Übung gegenüber dem letzten Mal.
-    Rückgabe: [{"name": "Bankdrücken", "changes": ["Satz 1: +2,5 kg", ...]}, ...]
-    """
+    """Fortschritte pro Übung gegenüber dem letzten Mal."""
     result = []
     for e in w["entries"]:
+        if e["is_timer"]:
+            continue
         prev = (last.get(e["exercise_id"]) or {}).get("sets") or []
         changes = []
+        vol, last_vol = exercise_volume(e["sets"]), exercise_volume(prev)
+        if vol and last_vol and vol > last_vol:
+            changes.append(f"Volumen +{format_number(vol - last_vol)} kg")
         for i, s in enumerate(e["sets"]):
             if i < len(prev):
                 p = set_progress(s, prev[i])
