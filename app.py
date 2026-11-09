@@ -1283,42 +1283,6 @@ def exercise_trends(workouts, today):
     return trends
 
 
-def build_hints(workouts, trends, goals, today):
-    """Einfache Regeln -> Hinweise, was du anpassen könntest."""
-    hints = []
-
-    # 1) Pause erkennen
-    last = max((w["date"] for w in workouts), default=None)
-    if last and (today - last).days >= 7:
-        hints.append(f"Dein letztes Workout ist {(today - last).days} Tage her. Plane die nächste Einheit fix ein.")
-
-    # 2) Hybrid-Balance der letzten 14 Tage
-    recent = [w for w in workouts if w["date"] >= today - timedelta(days=13)]
-    if recent:
-        if not any(w["type_key"] == "strength" for w in recent):
-            hints.append("In den letzten 2 Wochen kein Krafttraining. Eine Einheit hält deine Kraftwerte stabil.")
-        if not any(w["type_key"] != "strength" for w in recent):
-            hints.append("In den letzten 2 Wochen kein Ausdauertraining. Schon 1–2 lockere Einheiten erhalten die Grundausdauer.")
-
-    # 3) Stagnation / Rückschritt je Übung
-    for t in trends:
-        if t["change"] is not None and t["change"] <= 0:
-            if t["kind"] == "strength":
-                hints.append(f"{t['name']}: kein Fortschritt zu den 4 Wochen davor ({t['change']:+d} %). "
-                             "Versuch einen anderen Wiederholungsbereich, mehr Sätze oder eine leichtere Woche zur Erholung.")
-            else:
-                hints.append(f"{t['name']}: Pace nicht besser als in den 4 Wochen davor ({t['change']:+d} %). "
-                             "Mehr lockere Umfänge oder eine gezielte Tempo-Einheit pro Woche können helfen.")
-
-    # 4) Ziele mit knapper Zeit
-    for g in goals:
-        p, days = g.get("progress"), g.get("days_left")
-        if p and not p["reached"] and days is not None and 0 <= days <= 28 and p["percent"] < 80:
-            hints.append(f"Ziel „{g['title']}“: noch {days} Tage, erst {p['percent']} % erreicht. "
-                         "Setz den Fokus der nächsten Einheiten darauf oder passe Zielwert/Datum an.")
-    return hints
-
-
 @app.route("/dashboard")
 @login_required
 def dashboard():
@@ -1369,7 +1333,6 @@ def dashboard():
         day_workouts=day_workouts,
         trends=trends[:8],
         goals=goals,
-        hints=build_hints(workouts, trends, goals, today),
         recent=sorted(workouts, key=lambda w: w["date"], reverse=True)[:3],
         active=next((w for w in workouts if w["status"] == "active"), None),
         training_days_month=len({w["date"] for w in workouts

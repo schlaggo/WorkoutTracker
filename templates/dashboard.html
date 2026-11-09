@@ -69,16 +69,6 @@
   </div>
 </div>
 
-{# ---------- Hinweise ---------- #}
-{% if hints %}
-  <div class="card hints">
-    <h2>Hinweise</h2>
-    <ul>
-      {% for h in hints %}<li>{{ h }}</li>{% endfor %}
-    </ul>
-  </div>
-{% endif %}
-
 {# ---------- Trainings pro Woche: Raster (Spalten = KW, Zeilen = Mo unten bis So oben) ---------- #}
 {% set COL = 36.75 %}{# Breite einer Wochen-Spalte: 294 / 8 sichtbare Wochen #}
 {% set ROW = 21 %}{# Höhe einer Tages-Zeile #}

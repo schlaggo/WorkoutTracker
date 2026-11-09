@@ -280,10 +280,6 @@ input:disabled { opacity: .4; cursor: not-allowed; }
 .up { color: var(--endurance); font-weight: 600; }
 .down { color: var(--danger); font-weight: 600; }
 
-.hints { border-left: 3px solid var(--warn); }
-.hints ul { margin: 0; padding-left: 18px; }
-.hints li { margin: 8px 0; font-size: 14px; color: var(--text); }
-.hints li::marker { color: var(--warn); }
 
 .week-chart { width: 100%; height: auto; display: block; }
 .week-chart .label { fill: var(--faint); }
